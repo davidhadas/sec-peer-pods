@@ -11,11 +11,12 @@ import (
 )
 
 type SshPeer struct {
-	sshConn   ssh.Conn
-	ctx       context.Context
-	cancel    context.CancelFunc
-	outbounds map[string]*Outbound
-	inbounds  map[string]*Inbound
+	terminated string
+	sshConn    ssh.Conn
+	ctx        context.Context
+	done       chan bool
+	outbounds  map[string]*Outbound
+	inbounds   map[string]*Inbound
 }
 
 // Inbound side of the Tunnel - incoming tcp connections from local clients
@@ -38,15 +39,20 @@ type Outbound struct {
 }
 
 // NewSshPeer
-func NewSshPeer(ctx context.Context, cancel context.CancelFunc, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
+func NewSshPeer(ctx context.Context, done chan bool, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
 	peer := &SshPeer{
 		sshConn:   sshConn,
 		ctx:       ctx,
-		cancel:    cancel,
+		done:      done,
 		outbounds: make(map[string]*Outbound),
 		inbounds:  make(map[string]*Inbound),
 	}
 	go ssh.DiscardRequests(sshReqs)
+
+	go func() {
+		<-ctx.Done()
+		peer.Close("Context Canceled")
+	}()
 
 	go func() {
 		for ch := range chans {
@@ -54,7 +60,6 @@ func NewSshPeer(ctx context.Context, cancel context.CancelFunc, sshConn ssh.Conn
 			default:
 				log.Printf("NewSshPeer rejected channel for %s", ch.ChannelType())
 				ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %v", ch.ChannelType()))
-				continue
 			case "tunnel":
 				inPort := string(ch.ExtraData())
 
@@ -66,15 +71,26 @@ func NewSshPeer(ctx context.Context, cancel context.CancelFunc, sshConn ssh.Conn
 				chChan, chReqs, err := ch.Accept()
 				if err != nil {
 					log.Printf("NewSshPeer failed to accept tunnel channel: %s", err)
-					return
+					peer.Close("Accept failed")
 				}
 				log.Printf("NewSshPeer  - peer requested a tunnel channel for port %s", inPort)
 				outbound.accept(chChan, chReqs)
 			}
+
 		}
-		cancel()
+		log.Printf("Chans gorutine terminating!!")
+		peer.Close("Chans gorutine terminated") // signal done in case termination happened in peer
 	}()
 	return peer
+}
+
+func (peer *SshPeer) Close(who string) {
+	if peer.terminated == "" {
+		log.Printf("Peer Done by >>> %s <<<", who)
+		peer.terminated = who
+		peer.sshConn.Close()
+		peer.done <- true
+	}
 }
 
 // NewInbound create an Inbound and listen to incomming client connections
@@ -100,8 +116,8 @@ func (peer *SshPeer) AddInbound(inPort string) error {
 			tcpConn, err := inbound.tcpListener.Accept()
 			if err != nil {
 				log.Printf("NewInbound Accept error: %s - shutdown ssh", err)
-				inbound.peer.sshConn.Close() // Shutdown other side
-				inbound.peer.cancel()        // Shutdown this peer
+				inbound.peer.sshConn.Close()                            // Shutdown other side
+				inbound.peer.Close("inbound.tcpListener.Accept failed") // Shutdown this peer
 			}
 			NewInboundInstance(tcpConn, inbound)
 		}
