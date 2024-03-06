@@ -163,7 +163,7 @@ func InitKubernetesPhaseSshConfig() *ssh.ServerConfig {
 	return config
 }
 
-func KubernetesSShService(ctx context.Context, nConn net.Conn) (done chan bool, err error) {
+func KubernetesSShService(ctx context.Context, nConn net.Conn) (peer *sshproxy.SshPeer, done chan bool, err error) {
 	done = make(chan bool, 1)
 
 	log.Printf("Kubernetes Phase connected")
@@ -182,28 +182,11 @@ func KubernetesSShService(ctx context.Context, nConn net.Conn) (done chan bool, 
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, done, conn, chans, sshReqs)
-	err = peer.AddOutbound("7100", "127.0.0.1", "7100") // adaptor-forwarder
-	if err != nil {
-		log.Printf("Failed to initiate peer: %s", err)
-		return
-	}
-	err = peer.AddInbound("6443") // Kubernetes API
-	if err != nil {
-		log.Printf("Failed to initiate peer: %s", err)
-		return
-	}
-	/*
-		err = peer.AddInbound("53") // DNS
-		if err != nil {
-			log.Printf("Failed to initiate peer: %s", err)
-			return
-		}
-	*/
+	peer = sshproxy.NewSshPeer(ctx, done, conn, chans, sshReqs)
 	return
 }
 
-func AttestationSShService(ctx context.Context, nConn net.Conn) (done chan bool, err error) {
+func AttestationSShService(ctx context.Context, nConn net.Conn) (peer *sshproxy.SshPeer, done chan bool, err error) {
 	done = make(chan bool, 1)
 	log.Printf("Attestation Phase connected")
 	attestationPhaseConfig := InitAttestationPhaseSshConfig()
@@ -222,14 +205,7 @@ func AttestationSShService(ctx context.Context, nConn net.Conn) (done chan bool,
 
 	// Starting ssh tunnel services for attestation phase
 
-	peer := sshproxy.NewSshPeer(ctx, done, conn, chans, sshReqs)
-	err = peer.AddInbound("7000")
-	if err != nil {
-		err = fmt.Errorf("failed to initiate peer: %s", err)
-		return
-	}
-	// wait for a provenPpPrivateKey
-	WaitForProvenKeys(ctx, peer)
+	peer = sshproxy.NewSshPeer(ctx, done, conn, chans, sshReqs)
 
 	return
 }

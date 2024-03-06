@@ -8,12 +8,42 @@ import (
 
 	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
 	"github.com/davidhadas/sec-peer-pods/pkg/ppssh"
+	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
 	"github.com/davidhadas/sec-peer-pods/pkg/sshutil"
 	"github.com/davidhadas/sec-peer-pods/pkg/tessh"
 )
 
+func kubernetesPhase(nConn net.Conn, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	log.Printf("Kubernetes client connected\n")
+	peer, kubernetesDone, err := ppssh.KubernetesSShService(ctx, nConn)
+	if err != nil {
+		log.Printf("Failed to KubernetesSShService: %s", err)
+		return
+	}
+	peer.AddOutbounds(outbounds)
+	err = peer.AddInbounds(inbounds)
+	if err != nil {
+		log.Printf("Failed to KubernetesSShService: %s", err)
+		return
+	}
+	<-kubernetesDone
+	log.Printf("KubernetesSShService exiting")
+}
+
 func main() {
 	ppId := "myppid"
+
+	attestationPhaseInbounds := sshproxy.Inbounds{}
+	attestationPhaseInbounds.Add("7000")
+
+	kubernetesPhaseInbounds := sshproxy.Inbounds{}
+	kubernetesPhaseInbounds.Add("6443")
+	kubernetesPhaseInbounds.Add("9053")
+	kubernetesPhaseOutbounds := sshproxy.Outbounds{}
+	kubernetesPhaseOutbounds.Add("7100", "127.0.0.1", "7100")
 
 	kubemgr.InitKubeMgr()
 	os.Remove(ppssh.PROVEN_PP_PRIVATE_KEY_PATH)
@@ -35,7 +65,9 @@ func main() {
 	defer listener.Close()
 
 	var attestationDone chan bool
+	var peer *sshproxy.SshPeer
 	for {
+
 		// Singleton - accept an unproven connection for attestation
 		log.Printf("waiting for Attestation client to connect\n")
 		nConn, err := listener.Accept()
@@ -44,8 +76,16 @@ func main() {
 		}
 
 		log.Printf("Attestation client connected\n")
-		attestationDone, err = ppssh.AttestationSShService(ctx, nConn)
+		peer, attestationDone, err = ppssh.AttestationSShService(ctx, nConn)
 		if err == nil {
+			err = peer.AddInbounds(attestationPhaseInbounds)
+			if err != nil {
+				log.Printf("failed to initiate peer: %s", err)
+				continue
+			}
+			// wait for a provenPpPrivateKey
+			ppssh.WaitForProvenKeys(ctx, peer)
+
 			break
 		}
 		log.Print(err.Error())
@@ -68,22 +108,13 @@ func main() {
 	log.Printf("AttestationSShService exiting")
 
 	for {
-		var kubernetesDone chan bool
-		ctx, cancel = context.WithCancel(context.Background())
 
 		log.Printf("waiting for Kubernetes client to connect\n")
 		nConn, err := listener.Accept()
 		if err != nil {
 			log.Fatal("failed to accept incoming connection (Kubernetes Phase): ", err)
 		}
-		log.Printf("Kubernetes client connected\n")
-		kubernetesDone, err = ppssh.KubernetesSShService(ctx, nConn)
-		if err != nil {
-			cancel()
-			continue
-		}
-		<-kubernetesDone
-		cancel()
-		log.Printf("KubernetesSShService exiting")
+
+		kubernetesPhase(nConn, kubernetesPhaseInbounds, kubernetesPhaseOutbounds)
 	}
 }
