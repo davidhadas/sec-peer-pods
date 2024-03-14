@@ -10,7 +10,7 @@ import (
 	"github.com/davidhadas/sec-peer-pods/pkg/ppssh"
 	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
 	"github.com/davidhadas/sec-peer-pods/pkg/sshutil"
-	"github.com/davidhadas/sec-peer-pods/pkg/tessh"
+	"github.com/davidhadas/sec-peer-pods/pkg/wnssh"
 )
 
 func kubernetesPhase(nConn net.Conn, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {
@@ -90,7 +90,7 @@ func main() {
 		}
 		log.Print(err.Error())
 	}
-	_, tePublicKey, _ := kubemgr.KubeMgr.ReadSecret(tessh.TE_SECRET)
+	_, tePublicKey, _ := kubemgr.KubeMgr.ReadSecret(wnssh.CLIENT_SSH_SECRET)
 	ppPrivateKey, _, _ := kubemgr.KubeMgr.ReadSecret(ppId)
 
 	err = os.WriteFile(ppssh.PROVEN_TE_PUBLIC_KEY_PATH, tePublicKey, 0600)

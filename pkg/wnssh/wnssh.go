@@ -1,4 +1,4 @@
-package tessh
+package wnssh
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const TE_SECRET = "te"
+const CLIENT_SSH_SECRET = "sshclient"
 
 func TerminatePeerPodTunnel(peerPodId string) {
 	// Remove peerPod Secret named peerPodId
@@ -33,13 +33,13 @@ func GetPeerPodKeys(peerPodId string) (ppPublicKey []byte, tePrivateKey []byte) 
 		return
 	}
 
-	// Read TE Secret
-	tePrivateKey, _, err = kubemgr.KubeMgr.ReadSecret(TE_SECRET)
+	// Read WN Secret
+	tePrivateKey, _, err = kubemgr.KubeMgr.ReadSecret(CLIENT_SSH_SECRET)
 	if err != nil {
 		// auto-create a secret
-		tePrivateKey, _, err = kubemgr.KubeMgr.CreateSecret(TE_SECRET)
+		tePrivateKey, _, err = kubemgr.KubeMgr.CreateSecret(CLIENT_SSH_SECRET)
 		if err != nil {
-			log.Printf("failed to auto create TE Secret")
+			log.Printf("failed to auto create WN Secret")
 			return
 		}
 	}

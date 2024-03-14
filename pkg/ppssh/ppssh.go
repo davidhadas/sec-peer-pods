@@ -70,10 +70,10 @@ func getKubernetesPhaseKeys() (ppPrivateKeyBytes []byte, tePublicKeyBytes []byte
 		log.Fatalf("SSH Server failed to get PP Private Key from %s, err: %v", PROVEN_PP_PRIVATE_KEY_PATH, err)
 	}
 
-	// Kubernetes Phase  - must have TE proven tePublicKeyBytes and ppPrivateKeyBytes
+	// Kubernetes Phase  - must have WN proven tePublicKeyBytes and ppPrivateKeyBytes
 	tePublicKeyBytes, err = os.ReadFile(PROVEN_TE_PUBLIC_KEY_PATH)
 	if err != nil {
-		log.Fatalf("SSH Server failed to get TE Public Key from %s, err: %v", PROVEN_TE_PUBLIC_KEY_PATH, err)
+		log.Fatalf("SSH Server failed to get WN Public Key from %s, err: %v", PROVEN_TE_PUBLIC_KEY_PATH, err)
 	}
 
 	log.Printf("SSH Server initialized keys for Kubernetes Phase")
