@@ -2,73 +2,65 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"net/netip"
 	"time"
 
-	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
-	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
 	"github.com/davidhadas/sec-peer-pods/pkg/wnssh"
 )
 
 func main() {
-	ppId := "myppid"
-	ppAddr := "localhost:2022"
+	sid := "myppid"                           // SID
+	ipAddr, _ := netip.ParseAddr("127.0.0.1") // ipAddr of the VM
+	ipAddrs := []netip.Addr{ipAddr}
 
-	attestationPhaseOutbounds := sshproxy.Outbounds{}
-	attestationPhaseOutbounds.Add("7000", "127.0.0.1", "7777")
-
-	kubernetesPhaseInbounds := sshproxy.Inbounds{}
-	kubernetesPhaseInbounds.Add("7100")
-	kubernetesPhaseOutbounds := sshproxy.Outbounds{}
-	kubernetesPhaseOutbounds.Add("6443", "127.0.0.1", "6443")
-	kubernetesPhaseOutbounds.Add("9053", "127.0.0.1", "9053")
-
-	kubemgr.InitKubeMgr()
-	ppPublicKey, tePrivateKey := wnssh.GetPeerPodKeys(ppId)
-	if len(ppPublicKey) == 0 || len(tePrivateKey) == 0 {
-		log.Print("Missing keys for PeerPod")
+	///////// Adaptor Initialization when SSH is enabled
+	sshClient, err := wnssh.InitSshClient([]int{}, []int{7000}, []int{7100}, []int{6443, 9053})
+	if err != nil {
+		log.Printf("InitSshClient faield %v", err)
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Per peer pod (Resume):
+	// 		Get sid, ipAddrs in peerpods crd
+	//		ci := sshClient.InitPP(ctx, sid, ipAddrs)
+	//		if ci == nil {
+	//			log.Print("failed InitiatePeerPodTunnel")
+	//			// How do we handle errors here?
+	//			return
+	//		}
+	//		if err := ci.Start(); err != nil {
+	//			log.Printf("failed InitiatePeerPodTunnel: %s", err)
+	//			// How do we handle errors here?
+	//			return
+	//		}
+	// 		Set ci in sandbox
 
-	// Attestation Phase
-	log.Println("Starting Attstation Phase")
-	peer, attestationDone := wnssh.StartSshClient(ctx, ppAddr, tePrivateKey, nil)
-	if peer == nil {
-		log.Print("failed StartSshClient during attestation phase")
+	////////// CreateVM
+	// add sandbox
+
+	////////// StartVM
+	ctx := context.Background()
+
+	// Set sid, ipAddrs in peerpods crd
+	// Then do:
+	ci := sshClient.InitPP(ctx, sid, ipAddrs)
+	if ci == nil {
+		log.Print("failed InitiatePeerPodTunnel")
+		// fail StartVM
 		return
 	}
-	peer.AddOutbounds(attestationPhaseOutbounds)
-	<-attestationDone
-	cancel()
-	log.Println("Attstation Phase Done")
+	if err := ci.Start(); err != nil {
+		log.Printf("failed InitiatePeerPodTunnel: %s", err)
+		// fail StartVM
+		return
+	}
 
-	// Kubernetes Phase
+	// Set ci in sandbox
+	time.Sleep(time.Second * 10)
 
-	go func() {
-		for {
-			ctx, cancel := context.WithCancel(context.Background())
-			log.Println("Starting Kubernetes Phase")
-			peer, kubernetesDone := wnssh.StartSshClient(ctx, ppAddr, tePrivateKey, ppPublicKey)
-			if peer == nil {
-				log.Print("failed StartSshClient")
-				time.Sleep(time.Second)
-				continue
-			}
-			peer.AddOutbounds(kubernetesPhaseOutbounds)      // Kubernetes API
-			err := peer.AddInbounds(kubernetesPhaseInbounds) // adaptor-forwarder
-			if err != nil {
-				log.Printf("failed initiate peer: %s", err)
-				peer.Close(fmt.Sprintf("AddOutbound %v", err))
-				cancel()
-			}
-
-			<-kubernetesDone
-			cancel()
-		}
-	}()
-	time.Sleep(time.Minute)
-	wnssh.TerminatePeerPodTunnel(ppId)
+	////////// StopVM
+	// get ci from sandbox based on sid
+	ci.DisconnectPP(sid)
+	time.Sleep(time.Second * 30)
 }

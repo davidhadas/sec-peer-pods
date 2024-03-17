@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
@@ -17,61 +19,208 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const CLIENT_SSH_SECRET = "sshclient"
+const ADAPTOR_SSH_SECRET = "sshclient"
+const SSH_PORT = ":2022"
 
-func TerminatePeerPodTunnel(peerPodId string) {
-	// Remove peerPod Secret named peerPodId
-	kubemgr.KubeMgr.DeleteSecret(peerPodId)
+type SshClient struct {
+	wnSigner                  *ssh.Signer
+	kubernetesPhaseInbounds   sshproxy.Inbounds
+	kubernetesPhaseOutbounds  sshproxy.Outbounds
+	attestationPhaseInbounds  sshproxy.Inbounds
+	attestationPhaseOutbounds sshproxy.Outbounds
 }
 
-func GetPeerPodKeys(peerPodId string) (ppPublicKey []byte, tePrivateKey []byte) {
-	var err error
-	// Create peerPod Secret named peerPodId
-	_, ppPublicKey, err = kubemgr.KubeMgr.CreateSecret(peerPodId)
-	if err != nil {
-		log.Printf("failed to create PP Secret: %v", err)
-		return
-	}
+type SshClientInstance struct {
+	publicKey []byte
+	ppAddr    []string
+	sshClient *SshClient
+	ctx       context.Context
+	cancel    context.CancelFunc
+	k8sPhase  bool
+}
+
+func PpSecretName(sid string) string {
+	return "pp-" + sid
+}
+
+func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []int) (*SshClient, error) {
+
+	kubemgr.InitKubeMgr()
 
 	// Read WN Secret
-	tePrivateKey, _, err = kubemgr.KubeMgr.ReadSecret(CLIENT_SSH_SECRET)
+	wnPrivateKey, _, err := kubemgr.KubeMgr.ReadSecret(ADAPTOR_SSH_SECRET)
 	if err != nil {
 		// auto-create a secret
-		tePrivateKey, _, err = kubemgr.KubeMgr.CreateSecret(CLIENT_SSH_SECRET)
+		wnPrivateKey, _, err = kubemgr.KubeMgr.CreateSecret(ADAPTOR_SSH_SECRET)
 		if err != nil {
-			log.Printf("failed to auto create WN Secret")
-			return
+			return nil, fmt.Errorf("failed to auto create WN Secret: %w", err)
 		}
 	}
-	return
+	if len(wnPrivateKey) == 0 {
+		return nil, fmt.Errorf("missing keys for PeerPod")
+	}
+	// Create the Signer for this private key.
+	signer, err := ssh.ParsePrivateKey(wnPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse private key: %v", err)
+	}
+
+	sshClient := &SshClient{
+		wnSigner: &signer,
+	}
+	for _, port := range attestationInbounds {
+		sshClient.attestationPhaseInbounds.Add(strconv.Itoa(port))
+	}
+	for _, port := range attestationOutbounds {
+		sshClient.attestationPhaseOutbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+	}
+	for _, port := range kubernetesInbounds {
+		sshClient.kubernetesPhaseInbounds.Add(strconv.Itoa(port))
+	}
+	for _, port := range kubernetesOutbounds {
+		sshClient.kubernetesPhaseOutbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+	}
+
+	return sshClient, nil
 }
 
-func StartSshClient(ctx context.Context, ppAddr string, clientPrivateKey []byte, serverPublicKey []byte) (peer *sshproxy.SshPeer, done chan bool) {
-	done = make(chan bool, 1)
+func (ci *SshClientInstance) DisconnectPP(sid string) {
+	log.Print("SshClientInstance DisconnectPP")
+	// Cancel the VM connction
+	ci.cancel()
 
-	// Create the Signer for this private key.
-	signer, err := ssh.ParsePrivateKey(clientPrivateKey)
+	// Remove peerPod Secret named peerPodId
+	// TBD: Add this code once KBS integration is complete
+	// kubemgr.KubeMgr.DeleteSecret(PpSecretName(sid))
+}
+
+func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr) *SshClientInstance {
+	// Create peerPod Secret named peerPodId
+	var publicKey []byte
+	var err error
+
+	// Try reading first in case we resume an existing PP
+	_, publicKey, err = kubemgr.KubeMgr.ReadSecret(PpSecretName(sid))
 	if err != nil {
-		log.Printf("unable to parse private key: %v", err)
-		return
-	}
-
-	var serverSshPublicKey ssh.PublicKey
-	if len(serverPublicKey) > 0 {
-		serverSshPublicKey, _, _, _, err = ssh.ParseAuthorizedKey(serverPublicKey)
+		_, publicKey, err = kubemgr.KubeMgr.CreateSecret(PpSecretName(sid))
 		if err != nil {
-			log.Printf("unable to ParseAuthorizedKey serverPublicKey: %v", err)
-			return
+			log.Printf("failed to create PP Secret: %v", err)
+			return nil
 		}
 	}
 
+	var serverSshPublicKeyBytes []byte
+
+	if len(publicKey) > 0 {
+		serverSshPublicKey, _, _, _, err := ssh.ParseAuthorizedKey(publicKey)
+		if err != nil {
+			log.Printf("unable to ParseAuthorizedKey serverPublicKey: %v", err)
+			return nil
+		}
+		serverSshPublicKeyBytes = serverSshPublicKey.Marshal()
+	}
+
+	ppAddr := make([]string, len(ipAddr))
+	for i, ip := range ipAddr {
+		ppAddr[i] = ip.String() + ":" + sshutil.SSHPORT
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	return &SshClientInstance{
+		publicKey: serverSshPublicKeyBytes,
+		ppAddr:    ppAddr,
+		sshClient: c,
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+}
+
+func (ci *SshClientInstance) Start() error {
+	if !ci.k8sPhase {
+		// Attestation Phase
+		log.Println("Starting Attstation Phase")
+		if err := ci.StartAttestation(); err != nil {
+			return fmt.Errorf("failed StartAttestation: %v", err)
+		}
+		log.Println("Attstation Phase Done")
+		ci.k8sPhase = true
+	}
+
+	// Kubernetes Phase
+	go func() {
+		restarts := 0
+		for {
+			select {
+			case <-ci.ctx.Done():
+				log.Printf("Connect VM Done")
+				return
+			default:
+				log.Printf("Starting Kubernetes Phase (Number of restarts %d)", restarts)
+				if err := ci.StartKubernetes(); err != nil {
+					log.Printf("failed during StartKubernetes: %v", err)
+				}
+				time.Sleep(time.Second)
+				restarts += 1
+			}
+		}
+	}()
+	return nil
+}
+
+func (ci *SshClientInstance) StartKubernetes() error {
+	ctx, cancel := context.WithCancel(ci.ctx)
+
+	peer := ci.StartSshClient(ctx, ci.publicKey)
+	if peer == nil {
+		cancel()
+		return fmt.Errorf("failed StartSshClient")
+	}
+
+	peer.AddOutbounds(ci.sshClient.kubernetesPhaseOutbounds)
+	err := peer.AddInbounds(ci.sshClient.kubernetesPhaseInbounds)
+	if err != nil {
+		peer.Close("Inbounds failed")
+		cancel()
+		peer = nil
+		return fmt.Errorf("inbounds failed: %w", err)
+	} else {
+		peer.Wait()
+		cancel()
+	}
+	return nil
+}
+
+func (ci *SshClientInstance) StartAttestation() error {
+	ctx, cancel := context.WithCancel(ci.ctx)
+
+	peer := ci.StartSshClient(ctx, nil)
+	if peer == nil {
+		cancel()
+		return fmt.Errorf("failed StartSshClient")
+	}
+	peer.AddOutbounds(ci.sshClient.attestationPhaseOutbounds)
+	err := peer.AddInbounds(ci.sshClient.attestationPhaseInbounds)
+	if err != nil {
+		peer.Close("Inbounds failed")
+		cancel()
+		peer = nil
+		return fmt.Errorf("inbounds failed: %w", err)
+	} else {
+		peer.Wait()
+		cancel()
+	}
+
+	return nil
+}
+
+func (ci *SshClientInstance) StartSshClient(ctx context.Context, publicKey []byte) *sshproxy.SshPeer {
 	config := &ssh.ClientConfig{
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			if len(serverPublicKey) == 0 {
-				log.Printf("ssh Client skip validating server's HOST KEY - %s", key.Type())
+			if len(publicKey) == 0 {
+				log.Printf("ssh Client skip validating server's HOST KEY (%s) during attestation", key.Type())
 				return nil
 			}
-			if !bytes.Equal(key.Marshal(), serverSshPublicKey.Marshal()) {
+			if !bytes.Equal(key.Marshal(), ci.publicKey) {
 				log.Printf("ssh Client HOST KEY mismatch - %s", key.Type())
 				return fmt.Errorf("ssh: host key mismatch")
 			}
@@ -81,23 +230,35 @@ func StartSshClient(ctx context.Context, ppAddr string, clientPrivateKey []byte,
 		HostKeyAlgorithms: []string{"rsa-sha2-256", "rsa-sha2-512"},
 		Auth: []ssh.AuthMethod{
 			// Use the PublicKeys method for remote authentication.
-			ssh.PublicKeys(signer),
+			ssh.PublicKeys(*ci.sshClient.wnSigner),
 		},
 		Timeout: 5 * time.Minute,
 	}
+
 	// Dial your ssh server.
-	conn, err := net.DialTimeout("tcp", ppAddr, config.Timeout)
-	if err != nil {
-		log.Printf("unable to Dial: %v", err)
-		return
+	delay := time.Millisecond * 100
+	for {
+		for _, ppAddr := range ci.ppAddr {
+			conn, err := net.DialTimeout("tcp", ppAddr, config.Timeout)
+			if err != nil {
+				log.Printf("unable to Dial %s: %v", ppAddr, err)
+				continue
+			}
+			log.Printf("ssh Client connected - %s", conn.RemoteAddr())
+			netConn, chans, sshReqs, err := ssh.NewClientConn(conn, ppAddr, config)
+			if err != nil {
+				log.Printf("unable to connect: %v", err)
+				conn.Close()
+				continue
+			}
+			return sshproxy.NewSshPeer(ctx, netConn, chans, sshReqs)
+		}
+		time.Sleep(delay)
+		delay *= 2
+		if delay > 60*time.Second {
+			return nil
+		}
 	}
-	log.Printf("ssh Client connected - %s", conn.RemoteAddr())
-	netConn, chans, sshReqs, err := ssh.NewClientConn(conn, ppAddr, config)
-	if err != nil {
-		log.Printf("unable to connect: %v", err)
-	}
-	peer = sshproxy.NewSshPeer(ctx, done, netConn, chans, sshReqs)
-	return
 }
 
 func InitClientKeys(keyType string) []byte {

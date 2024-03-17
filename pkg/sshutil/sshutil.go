@@ -6,7 +6,7 @@ import (
 	"encoding/pem"
 )
 
-const SSHPORT = "2022"
+const SSHPORT = "2222"
 
 // RsaPrivateKeyPEM return a PEM for the RSA Private Key
 func RsaPrivateKeyPEM(pKey *rsa.PrivateKey) []byte {

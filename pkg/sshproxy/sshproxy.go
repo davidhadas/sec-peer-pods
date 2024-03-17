@@ -59,11 +59,11 @@ func (inbounds *Inbounds) Add(inPort string) {
 }
 
 // NewSshPeer
-func NewSshPeer(ctx context.Context, done chan bool, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
+func NewSshPeer(ctx context.Context, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
 	peer := &SshPeer{
 		sshConn:   sshConn,
 		ctx:       ctx,
-		done:      done,
+		done:      make(chan bool, 1),
 		outbounds: make(map[string]*Outbound),
 		inbounds:  make(map[string]*Inbound),
 	}
@@ -96,12 +96,15 @@ func NewSshPeer(ctx context.Context, done chan bool, sshConn ssh.Conn, chans <-c
 				log.Printf("NewSshPeer  - peer requested a tunnel channel for port %s", inPort)
 				outbound.accept(chChan, chReqs)
 			}
-
 		}
-		log.Printf("Chans gorutine terminating!!")
+		log.Printf("Ssh chans channel closed")
 		peer.Close("Chans gorutine terminated") // signal done in case termination happened in peer
 	}()
 	return peer
+}
+
+func (peer *SshPeer) Wait() {
+	<-peer.done
 }
 
 func (peer *SshPeer) Close(who string) {

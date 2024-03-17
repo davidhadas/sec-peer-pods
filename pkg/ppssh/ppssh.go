@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
@@ -23,6 +24,100 @@ const (
 	UNPROVEN_TE_PUBLIC_KEY_PATH = "/tmp/unprovenTePublicKey"
 	SIGNELTON_PATH              = "/tmp/sshSingleton"
 )
+
+func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {
+	log.Printf("waiting for Kubernetes client to connect\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var peer *sshproxy.SshPeer
+	for peer == nil {
+		nConn, err := listener.Accept()
+		if err != nil {
+			log.Fatal("failed to accept incoming connection (Kubernetes Phase): ", err)
+		}
+		//ctx, cancel := context.WithCancel(context.Background())
+		//defer cancel()
+
+		log.Printf("Kubernetes client connected\n")
+		peer, err = KubernetesSShService(ctx, nConn)
+		if err != nil {
+			log.Printf("Failed k8sPhase: %s", err)
+			peer = nil
+			continue
+		}
+		peer.AddOutbounds(outbounds)
+		err = peer.AddInbounds(inbounds)
+		if err != nil {
+			log.Printf("Failed addInbounds during k8sPhase: %s", err)
+			return
+		}
+		peer.Wait()
+		log.Printf("KubernetesSShService exiting")
+	}
+}
+
+func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {
+	// Singleton - accept an unproven connection for attestation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var peer *sshproxy.SshPeer
+	for peer == nil {
+		log.Printf("waiting for Attestation client to connect\n")
+		nConn, err := listener.Accept()
+		if err != nil {
+			log.Fatal("failed to accept incoming connection (Attestation Phase): ", err)
+		}
+
+		log.Printf("Attestation client connected\n")
+
+		peer, err = AttestationSShService(ctx, nConn)
+		if err != nil {
+			log.Print(err.Error())
+			peer = nil
+		}
+	}
+
+	peer.AddOutbounds(outbounds)
+	if err := peer.AddInbounds(inbounds); err != nil {
+		log.Fatal("failed to add Inbounds during Attestation Phase: ", err)
+	}
+	// wait for a provenPpPrivateKey
+	WaitForProvenKeys(ctx, peer)
+	peer.Wait()
+}
+
+func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []int) {
+	Singleton()
+	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
+	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
+	for _, port := range attestationInbounds {
+		attestation_inbounds.Add(strconv.Itoa(port))
+	}
+	for _, port := range attestationOutbounds {
+		attestation_outbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+	}
+	for _, port := range kubernetesInbounds {
+		k8s_inbounds.Add(strconv.Itoa(port))
+	}
+	for _, port := range kubernetesOutbounds {
+		k8s_outbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+	}
+
+	log.Printf("SSH Service starting 0.0.0.0:%s\n", sshutil.SSHPORT)
+	listener, err := net.Listen("tcp", "0.0.0.0:"+sshutil.SSHPORT)
+	if err != nil {
+		log.Fatal("failed to listen for connection: ", err)
+	}
+	go func() {
+		attestationPhase(listener, attestation_inbounds, attestation_outbounds)
+		for {
+			k8sPhase(listener, k8s_inbounds, k8s_outbounds)
+		}
+	}()
+	return
+}
 
 func Singleton() {
 	// Signleton- make sure we run the ssh service once per boot.
@@ -163,16 +258,14 @@ func InitKubernetesPhaseSshConfig() *ssh.ServerConfig {
 	return config
 }
 
-func KubernetesSShService(ctx context.Context, nConn net.Conn) (peer *sshproxy.SshPeer, done chan bool, err error) {
-	done = make(chan bool, 1)
-
+func KubernetesSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPeer, error) {
 	log.Printf("Kubernetes Phase connected")
 	kubernetesPhaseConfig := InitKubernetesPhaseSshConfig()
 	// Handshake on the incoming net.Conn.
 	conn, chans, sshReqs, err := ssh.NewServerConn(nConn, kubernetesPhaseConfig)
 	if err != nil {
 		log.Printf("Failed to handshake: %s", err)
-		return
+		return nil, err
 	}
 
 	if conn.Permissions != nil {
@@ -182,19 +275,18 @@ func KubernetesSShService(ctx context.Context, nConn net.Conn) (peer *sshproxy.S
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer = sshproxy.NewSshPeer(ctx, done, conn, chans, sshReqs)
-	return
+	peer := sshproxy.NewSshPeer(ctx, conn, chans, sshReqs)
+	return peer, nil
 }
 
-func AttestationSShService(ctx context.Context, nConn net.Conn) (peer *sshproxy.SshPeer, done chan bool, err error) {
-	done = make(chan bool, 1)
+func AttestationSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPeer, error) {
 	log.Printf("Attestation Phase connected")
 	attestationPhaseConfig := InitAttestationPhaseSshConfig()
 	// Handshake on the incoming net.Conn.
 	conn, chans, sshReqs, err := ssh.NewServerConn(nConn, attestationPhaseConfig)
 	if err != nil {
 		err = fmt.Errorf("failed to handshake: %s", err)
-		return
+		return nil, err
 	}
 
 	if conn.Permissions != nil {
@@ -204,8 +296,20 @@ func AttestationSShService(ctx context.Context, nConn net.Conn) (peer *sshproxy.
 	}
 
 	// Starting ssh tunnel services for attestation phase
+	peer := sshproxy.NewSshPeer(ctx, conn, chans, sshReqs)
+	return peer, nil
+}
 
-	peer = sshproxy.NewSshPeer(ctx, done, conn, chans, sshReqs)
+func CopyFile(source, dest string) {
+	input, err := os.ReadFile(source)
+	if err != nil {
+		log.Printf("Error reading %s: %s", source, err.Error())
+		return
+	}
 
-	return
+	err = os.WriteFile(dest, input, 0644)
+	if err != nil {
+		log.Printf("Error creating %s: %s", dest, err.Error())
+		return
+	}
 }
