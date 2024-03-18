@@ -40,7 +40,8 @@ type SshClientInstance struct {
 }
 
 func PpSecretName(sid string) string {
-	return "pp-" + sid
+	//return "pp-" + sid
+	return "pp-fake"
 }
 
 func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []int) (*SshClient, error) {

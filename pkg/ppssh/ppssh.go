@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	PROVEN_PP_PRIVATE_KEY_PATH  = "/root/provenPpPrivateKey"
-	PROVEN_TE_PUBLIC_KEY_PATH   = "/root/provenTePublicKey"
-	UNPROVEN_TE_PUBLIC_KEY_PATH = "/root/unprovenTePublicKey"
-	SIGNELTON_PATH              = "/root/sshSingleton"
+	PROVEN_PP_PRIVATE_KEY_PATH  = "/tmp/provenPpPrivateKey"
+	PROVEN_TE_PUBLIC_KEY_PATH   = "/tmp/provenTePublicKey"
+	UNPROVEN_TE_PUBLIC_KEY_PATH = "/tmp/unprovenTePublicKey"
+	SIGNELTON_PATH              = "/tmp/sshSingleton"
 )
 
 func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {

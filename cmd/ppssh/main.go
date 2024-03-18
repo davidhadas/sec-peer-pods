@@ -18,10 +18,9 @@ func main() {
 	ppssh.InitSshServer([]int{7000}, []int{}, []int{6443, 9053}, []int{7100})
 
 	time.Sleep(10 * time.Second)
-	ppssh.CopyFile(ppssh.PROVEN_TE_PUBLIC_KEY_PATH+".fake", ppssh.PROVEN_TE_PUBLIC_KEY_PATH)
-	ppssh.CopyFile(ppssh.PROVEN_PP_PRIVATE_KEY_PATH+".fake", ppssh.PROVEN_PP_PRIVATE_KEY_PATH)
+	ppssh.CopyFile("/var"+ppssh.PROVEN_TE_PUBLIC_KEY_PATH, ppssh.PROVEN_TE_PUBLIC_KEY_PATH)
+	ppssh.CopyFile("/var"+ppssh.PROVEN_PP_PRIVATE_KEY_PATH, ppssh.PROVEN_PP_PRIVATE_KEY_PATH)
 	/*
-
 		sid := "myppid"
 		_, tePublicKey, _ := kubemgr.KubeMgr.ReadSecret(wnssh.ADAPTOR_SSH_SECRET)
 		ppPrivateKey, _, _ := kubemgr.KubeMgr.ReadSecret(wnssh.PpSecretName(sid))
