@@ -41,6 +41,7 @@ type SshClientInstance struct {
 
 func PpSecretName(sid string) string {
 	//return "pp-" + sid
+	log.Printf("Using fake secrets << DEVELOPMENT ONLY! >>")
 	return "pp-fake"
 }
 
