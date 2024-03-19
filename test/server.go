@@ -30,21 +30,23 @@ func Server(port int) {
 func handleConnection(conn net.Conn, port int) {
 	// Close the connection when we're done
 	defer conn.Close()
+	for {
 
-	// Read incoming data
-	buf := make([]byte, 1024)
-	_, err := conn.Read(buf)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+		// Read incoming data
+		buf := make([]byte, 1024)
+		_, err := conn.Read(buf)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 
-	// Print the incoming data
-	fmt.Printf("Received: %s port %d\n", buf, port)
-	_, err = conn.Write(buf)
-	if err != nil {
-		fmt.Println(err)
-		return
+		// Print the incoming data
+		fmt.Printf("Received: %s port %d\n", buf, port)
+		_, err = conn.Write(buf)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Printf("Written: %s port %d\n", buf, port)
 	}
-	fmt.Printf("Written: %s port %d\n", buf, port)
 }

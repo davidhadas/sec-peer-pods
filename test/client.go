@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 )
 
 func Client(port int) {
@@ -27,6 +28,7 @@ func Client(port int) {
 		return
 	}
 	fmt.Printf("Client %d success\n", port)
+	time.Sleep(time.Minute)
 	// Close the connection
 	conn.Close()
 }

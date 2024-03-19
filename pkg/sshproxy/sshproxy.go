@@ -16,20 +16,20 @@ type SshPeer struct {
 	sshConn    ssh.Conn
 	ctx        context.Context
 	done       chan bool
-	outbounds  map[string]*Outbound
-	inbounds   map[string]*Inbound
+	outbounds  map[int]*Outbound
+	inbounds   map[int]*Inbound
 }
 
 // Inbound side of the Tunnel - incoming tcp connections from local clients
 type Inbound struct {
 	// tcp peers
-	OutPort     string
+	OutPort     int
 	TcpListener *net.TCPListener
 }
 
 type Outbound struct {
 	// tcp peers
-	OutPort string
+	OutPort int
 }
 
 type Outbounds struct {
@@ -42,7 +42,7 @@ type Inbounds struct {
 
 func (outbounds *Outbounds) Add(outPort int) {
 	outbound := &Outbound{
-		OutPort: strconv.Itoa(outPort),
+		OutPort: outPort,
 	}
 	outbounds.list = append(outbounds.list, outbound)
 }
@@ -59,7 +59,7 @@ func (inbounds *Inbounds) Add(outPort int, inPort int) error {
 
 	inbound := &Inbound{
 		TcpListener: tcpListener,
-		OutPort:     strconv.Itoa(outPort),
+		OutPort:     outPort,
 	}
 	inbounds.list = append(inbounds.list, inbound)
 	return nil
@@ -71,8 +71,8 @@ func NewSshPeer(ctx context.Context, sshConn ssh.Conn, chans <-chan ssh.NewChann
 		sshConn:   sshConn,
 		ctx:       ctx,
 		done:      make(chan bool, 1),
-		outbounds: make(map[string]*Outbound),
-		inbounds:  make(map[string]*Inbound),
+		outbounds: make(map[int]*Outbound),
+		inbounds:  make(map[int]*Inbound),
 	}
 	go ssh.DiscardRequests(sshReqs)
 
@@ -88,11 +88,14 @@ func NewSshPeer(ctx context.Context, sshConn ssh.Conn, chans <-chan ssh.NewChann
 				log.Printf("NewSshPeer rejected channel for %s", ch.ChannelType())
 				ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %v", ch.ChannelType()))
 			case "tunnel":
-				inPort := string(ch.ExtraData())
-
+				inPort, err := strconv.Atoi(string(ch.ExtraData()))
+				if err != nil {
+					ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("NewSshPeer rejected tunnel channel  - ilegal port: %s", string(ch.ExtraData())))
+					continue
+				}
 				outbound := peer.outbounds[inPort]
 				if outbound == nil {
-					ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("NewSshPeer rejected tunnel channel  - port not allowed: %s", inPort))
+					ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("NewSshPeer rejected tunnel channel  - port not allowed: %d", inPort))
 					continue
 				}
 				chChan, chReqs, err := ch.Accept()
@@ -100,7 +103,7 @@ func NewSshPeer(ctx context.Context, sshConn ssh.Conn, chans <-chan ssh.NewChann
 					log.Printf("NewSshPeer failed to accept tunnel channel: %s", err)
 					peer.Close("Accept failed")
 				}
-				log.Printf("NewSshPeer  - peer requested a tunnel channel for port %s", inPort)
+				log.Printf("NewSshPeer  - peer requested a tunnel channel for port %d", inPort)
 				outbound.accept(chChan, chReqs)
 			}
 		}
@@ -141,7 +144,7 @@ func (peer *SshPeer) AddInbound(inbound *Inbound) error {
 }
 
 // NewInbound create an Inbound and listen to incomming client connections
-func (peer *SshPeer) DelInbound(inPort string) {
+func (peer *SshPeer) DelInbound(inPort int) {
 	if inbound, found := peer.inbounds[inPort]; found {
 		delete(peer.inbounds, inPort)
 		inbound.TcpListener.Close()
@@ -150,12 +153,12 @@ func (peer *SshPeer) DelInbound(inPort string) {
 
 func NewInboundInstance(tcpConn io.ReadWriteCloser, peer *SshPeer, inbound *Inbound) {
 
-	sshChan, channelReqs, err := peer.sshConn.OpenChannel("tunnel", []byte(inbound.OutPort))
+	sshChan, channelReqs, err := peer.sshConn.OpenChannel("tunnel", []byte(strconv.Itoa(inbound.OutPort)))
 	if err != nil {
 		log.Printf("NewInboundInstance OpenChannel error: %s", err)
 		return
 	}
-	log.Printf("NewInboundInstance OpenChannel opening tunnel for: %s", inbound.OutPort)
+	log.Printf("NewInboundInstance OpenChannel opening tunnel for: %d", inbound.OutPort)
 	go ssh.DiscardRequests(channelReqs)
 
 	go func() {
@@ -197,20 +200,20 @@ func (peer *SshPeer) AddOutbound(outbound *Outbound) {
 }
 
 // NewInbound create an Inbound and listen to incomming client connections
-func (peer *SshPeer) DelOutbound(outPort string) {
+func (peer *SshPeer) DelOutbound(outPort int) {
 	delete(peer.outbounds, outPort)
 }
 
 func (outbound *Outbound) accept(chChan ssh.Channel, chReqs <-chan *ssh.Request) {
-
-	tcpConn, err := net.Dial("tcp", "127.0.0.1:"+outbound.OutPort)
+	addr := fmt.Sprintf("127.0.0.1:%d", outbound.OutPort)
+	tcpConn, err := net.Dial("tcp", addr)
 	if err != nil {
-		log.Printf("Outbound dial error: %s - closing channel", err)
+		log.Printf("Outbound dial to address %s err: %s - closing channel", addr, err)
 		chChan.Close()
 		return
 	}
 
-	log.Printf("Outbound dial success - connected to port %s", outbound.OutPort)
+	log.Printf("Outbound dial success - connected to port %d", outbound.OutPort)
 
 	go ssh.DiscardRequests(chReqs)
 
@@ -227,5 +230,4 @@ func (outbound *Outbound) accept(chChan ssh.Channel, chReqs <-chan *ssh.Request)
 		chChan.Close()
 		tcpConn.Close()
 	}()
-
 }
