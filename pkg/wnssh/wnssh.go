@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
@@ -24,19 +23,25 @@ const SSH_PORT = ":2022"
 
 type SshClient struct {
 	wnSigner                  *ssh.Signer
-	kubernetesPhaseInbounds   sshproxy.Inbounds
-	kubernetesPhaseOutbounds  sshproxy.Outbounds
-	attestationPhaseInbounds  sshproxy.Inbounds
-	attestationPhaseOutbounds sshproxy.Outbounds
+	kubernetesPhaseInbounds   []int
+	kubernetesPhaseOutbounds  []int
+	attestationPhaseInbounds  []int
+	attestationPhaseOutbounds []int
 }
 
 type SshClientInstance struct {
-	publicKey []byte
-	ppAddr    []string
-	sshClient *SshClient
-	ctx       context.Context
-	cancel    context.CancelFunc
-	k8sPhase  bool
+	publicKey               []byte
+	ppAddr                  []string
+	sshClient               *SshClient
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	k8sPhase                bool
+	attestationInbounds     sshproxy.Inbounds
+	attestationOutbounds    sshproxy.Outbounds
+	kubernetesInbounds      sshproxy.Inbounds
+	kubernetesOutbounds     sshproxy.Outbounds
+	attestationInboundPorts map[int]int
+	kubernetesInboundPorts  map[int]int
 }
 
 func PpSecretName(sid string) string {
@@ -46,7 +51,6 @@ func PpSecretName(sid string) string {
 }
 
 func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []int) (*SshClient, error) {
-
 	kubemgr.InitKubeMgr()
 
 	// Read WN Secret
@@ -68,24 +72,39 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	}
 
 	sshClient := &SshClient{
-		wnSigner: &signer,
-	}
-	for _, port := range attestationInbounds {
-		sshClient.attestationPhaseInbounds.Add(strconv.Itoa(port))
-	}
-	for _, port := range attestationOutbounds {
-		sshClient.attestationPhaseOutbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
-	}
-	for _, port := range kubernetesInbounds {
-		sshClient.kubernetesPhaseInbounds.Add(strconv.Itoa(port))
-	}
-	for _, port := range kubernetesOutbounds {
-		sshClient.kubernetesPhaseOutbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+		wnSigner:                  &signer,
+		attestationPhaseInbounds:  attestationInbounds,
+		attestationPhaseOutbounds: attestationOutbounds,
+		kubernetesPhaseInbounds:   kubernetesInbounds,
+		kubernetesPhaseOutbounds:  kubernetesOutbounds,
 	}
 
 	return sshClient, nil
 }
 
+func (ci *SshClientInstance) GetInPorts() []int {
+	ports := []int{}
+	for _, inPort := range ci.attestationInboundPorts {
+		ports = append(ports, inPort)
+	}
+	for _, inPort := range ci.kubernetesInboundPorts {
+		ports = append(ports, inPort)
+	}
+	return ports
+}
+
+func (ci *SshClientInstance) GetPort(outPort int) int {
+	var ok bool
+	var inPort int
+	inPort, ok = ci.kubernetesInboundPorts[outPort]
+	if !ok {
+		inPort, ok = ci.attestationInboundPorts[outPort]
+		if !ok {
+			return 0
+		}
+	}
+	return inPort
+}
 func (ci *SshClientInstance) DisconnectPP(sid string) {
 	log.Print("SshClientInstance DisconnectPP")
 	// Cancel the VM connction
@@ -128,13 +147,38 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	return &SshClientInstance{
-		publicKey: serverSshPublicKeyBytes,
-		ppAddr:    ppAddr,
-		sshClient: c,
-		ctx:       ctx,
-		cancel:    cancel,
+	ci := &SshClientInstance{
+		publicKey:               serverSshPublicKeyBytes,
+		ppAddr:                  ppAddr,
+		sshClient:               c,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		attestationInboundPorts: make(map[int]int),
+		kubernetesInboundPorts:  make(map[int]int),
 	}
+
+	for _, outPort := range c.attestationPhaseInbounds {
+		inPort := sshutil.GetRandomPort()
+		for ci.attestationInbounds.Add(outPort, inPort) != nil {
+			inPort = sshutil.GetRandomPort()
+		}
+		ci.kubernetesInboundPorts[outPort] = inPort
+	}
+	for _, outPort := range c.attestationPhaseOutbounds {
+		ci.attestationOutbounds.Add(outPort)
+	}
+	for _, outPort := range c.kubernetesPhaseInbounds {
+		inPort := sshutil.GetRandomPort()
+		for ci.kubernetesInbounds.Add(outPort, inPort) != nil {
+			inPort = sshutil.GetRandomPort()
+		}
+		ci.kubernetesInboundPorts[outPort] = inPort
+	}
+	for _, outPort := range c.kubernetesPhaseOutbounds {
+		ci.kubernetesOutbounds.Add(outPort)
+	}
+
+	return ci
 }
 
 func (ci *SshClientInstance) Start() error {
@@ -178,8 +222,8 @@ func (ci *SshClientInstance) StartKubernetes() error {
 		return fmt.Errorf("failed StartSshClient")
 	}
 
-	peer.AddOutbounds(ci.sshClient.kubernetesPhaseOutbounds)
-	err := peer.AddInbounds(ci.sshClient.kubernetesPhaseInbounds)
+	peer.AddOutbounds(ci.kubernetesOutbounds)
+	err := peer.AddInbounds(ci.kubernetesInbounds)
 	if err != nil {
 		peer.Close("Inbounds failed")
 		cancel()
@@ -200,8 +244,8 @@ func (ci *SshClientInstance) StartAttestation() error {
 		cancel()
 		return fmt.Errorf("failed StartSshClient")
 	}
-	peer.AddOutbounds(ci.sshClient.attestationPhaseOutbounds)
-	err := peer.AddInbounds(ci.sshClient.attestationPhaseInbounds)
+	peer.AddOutbounds(ci.attestationOutbounds)
+	err := peer.AddInbounds(ci.attestationInbounds)
 	if err != nil {
 		peer.Close("Inbounds failed")
 		cancel()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/wnssh"
+	"github.com/davidhadas/sec-peer-pods/test"
 )
 
 func main() {
@@ -15,6 +16,7 @@ func main() {
 	ipAddrs := []netip.Addr{ipAddr}
 
 	///////// Adaptor Initialization when SSH is enabled
+
 	sshClient, err := wnssh.InitSshClient([]int{}, []int{7000}, []int{7100}, []int{6443, 9053})
 	if err != nil {
 		log.Printf("InitSshClient faield %v", err)
@@ -50,6 +52,15 @@ func main() {
 		// fail StartVM
 		return
 	}
+
+	inPort := ci.GetPort(7100)
+	if inPort == 0 {
+		log.Print("failed find port")
+		// fail StartVM
+		return
+	}
+	go test.Client(inPort)
+
 	if err := ci.Start(); err != nil {
 		log.Printf("failed InitiatePeerPodTunnel: %s", err)
 		// fail StartVM
@@ -57,10 +68,10 @@ func main() {
 	}
 
 	// Set ci in sandbox
-	time.Sleep(time.Second * 10)
+	time.Sleep(time.Minute * 10)
 
 	////////// StopVM
 	// get ci from sandbox based on sid
 	ci.DisconnectPP(sid)
-	time.Sleep(time.Second * 30)
+	time.Sleep(time.Minute * 10)
 }

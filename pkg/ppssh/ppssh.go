@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
@@ -92,17 +91,21 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	Singleton()
 	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
 	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
-	for _, port := range attestationInbounds {
-		attestation_inbounds.Add(strconv.Itoa(port))
+	for _, outPort := range attestationInbounds {
+		if err := attestation_inbounds.Add(outPort, outPort); err != nil {
+			log.Fatalf("Failed to open port %d:  %v", outPort, err)
+		}
 	}
-	for _, port := range attestationOutbounds {
-		attestation_outbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+	for _, outPort := range attestationOutbounds {
+		attestation_outbounds.Add(outPort)
 	}
-	for _, port := range kubernetesInbounds {
-		k8s_inbounds.Add(strconv.Itoa(port))
+	for _, outPort := range kubernetesInbounds {
+		if err := attestation_inbounds.Add(outPort, outPort); err != nil {
+			log.Fatalf("Failed to open port %d:  %v", outPort, err)
+		}
 	}
-	for _, port := range kubernetesOutbounds {
-		k8s_outbounds.Add(strconv.Itoa(port), "127.0.0.1", strconv.Itoa(port))
+	for _, outPort := range kubernetesOutbounds {
+		k8s_outbounds.Add(outPort)
 	}
 
 	log.Printf("SSH Service starting 0.0.0.0:%s\n", sshutil.SSHPORT)
@@ -116,7 +119,6 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 			k8sPhase(listener, k8s_inbounds, k8s_outbounds)
 		}
 	}()
-	return
 }
 
 func Singleton() {
