@@ -121,7 +121,13 @@ func (peer *SshPeer) Close(who string) {
 	if peer.terminated == "" {
 		log.Printf("Peer Done by >>> %s <<<", who)
 		peer.terminated = who
+		for inPort := range peer.inbounds {
+			peer.DelInbound(inPort)
+		}
 		peer.sshConn.Close()
+		for inPort := range peer.inbounds {
+			peer.DelInbound(inPort)
+		}
 		peer.done <- true
 	}
 }
@@ -132,10 +138,12 @@ func (peer *SshPeer) AddInbound(inbound *Inbound) error {
 		for {
 			tcpConn, err := inbound.TcpListener.Accept()
 			if err != nil {
-				log.Printf("NewInbound Accept error: %s - shutdown ssh", err)
+				log.Printf("Inbound Accept error: %s - shutdown ssh", err)
 				peer.sshConn.Close()                            // Shutdown other side
 				peer.Close("inbound.tcpListener.Accept failed") // Shutdown this peer
+				return
 			}
+			log.Printf("Inbound Accept: OutPort %d", inbound.OutPort)
 			NewInboundInstance(tcpConn, peer, inbound)
 		}
 	}()
