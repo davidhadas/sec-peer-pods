@@ -87,13 +87,13 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 	peer.Wait()
 }
 
-func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []int) {
+func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string) {
 	Singleton()
 	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
 	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
 	for _, outPort := range attestationInbounds {
 		if err := attestation_inbounds.Add(outPort, outPort); err != nil {
-			log.Fatalf("Failed to open port %d:  %v", outPort, err)
+			log.Fatalf("Failed to open port %s:  %v", outPort, err)
 		}
 	}
 	for _, outPort := range attestationOutbounds {
@@ -101,7 +101,7 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	}
 	for _, outPort := range kubernetesInbounds {
 		if err := attestation_inbounds.Add(outPort, outPort); err != nil {
-			log.Fatalf("Failed to open port %d:  %v", outPort, err)
+			log.Fatalf("Failed to open port %s:  %v", outPort, err)
 		}
 	}
 	for _, outPort := range kubernetesOutbounds {

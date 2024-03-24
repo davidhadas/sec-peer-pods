@@ -3,13 +3,12 @@ package test
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"time"
 )
 
-func Client(port int) {
+func Client(port string) {
 	// Connect to the server
-	conn, err := net.Dial("tcp", "localhost:"+strconv.Itoa(port))
+	conn, err := net.Dial("tcp", "localhost:"+port)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -27,7 +26,7 @@ func Client(port int) {
 		fmt.Println(err)
 		return
 	}
-	fmt.Printf("Client %d success\n", port)
+	fmt.Printf("Client %s success\n", port)
 	time.Sleep(time.Minute)
 	// Close the connection
 	conn.Close()

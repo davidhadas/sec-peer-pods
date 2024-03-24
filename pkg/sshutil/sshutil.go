@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"log"
 	"math/big"
+	"strconv"
 	"time"
 )
 
@@ -21,13 +22,13 @@ func RsaPrivateKeyPEM(pKey *rsa.PrivateKey) []byte {
 	})
 }
 
-func GetRandomPort() int {
+func GetRandomPort() string {
 	for i := 0; i < 100; i++ {
 		if inPort, err := rand.Int(rand.Reader, big.NewInt(50000)); err == nil {
-			return int(inPort.Uint64()) + 10000
+			return strconv.Itoa(int(inPort.Uint64()) + 10000)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	log.Fatalf("Failed to GetRandomPort")
-	return 0 // never used
+	return "" // never used
 }

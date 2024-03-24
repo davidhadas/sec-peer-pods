@@ -20,7 +20,7 @@ func main() {
 
 	go test.Server(7100)
 
-	ppssh.InitSshServer([]int{7000}, []int{}, []int{6443, 9053}, []int{7100})
+	ppssh.InitSshServer([]string{"7000"}, []string{}, []string{"6443", "9053"}, []string{"7100"})
 
 	time.Sleep(30 * time.Second)
 

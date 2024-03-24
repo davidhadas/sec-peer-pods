@@ -17,7 +17,7 @@ func main() {
 
 	///////// Adaptor Initialization when SSH is enabled
 
-	sshClient, err := wnssh.InitSshClient([]int{}, []int{7000}, []int{7100}, []int{6443, 9053})
+	sshClient, err := wnssh.InitSshClient([]string{}, []string{"7000"}, []string{"7100"}, []string{"6443", "9053"})
 	if err != nil {
 		log.Printf("InitSshClient faield %v", err)
 		return
@@ -53,8 +53,8 @@ func main() {
 		return
 	}
 
-	inPort := ci.GetPort(7100)
-	if inPort == 0 {
+	inPort := ci.GetPort("7100")
+	if inPort == "" {
 		log.Print("failed find port")
 		// fail StartVM
 		return

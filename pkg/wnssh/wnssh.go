@@ -23,10 +23,10 @@ const SSH_PORT = ":2022"
 
 type SshClient struct {
 	wnSigner                  *ssh.Signer
-	kubernetesPhaseInbounds   []int
-	kubernetesPhaseOutbounds  []int
-	attestationPhaseInbounds  []int
-	attestationPhaseOutbounds []int
+	kubernetesPhaseInbounds   []string
+	kubernetesPhaseOutbounds  []string
+	attestationPhaseInbounds  []string
+	attestationPhaseOutbounds []string
 }
 
 type SshClientInstance struct {
@@ -40,8 +40,8 @@ type SshClientInstance struct {
 	attestationOutbounds    sshproxy.Outbounds
 	kubernetesInbounds      sshproxy.Inbounds
 	kubernetesOutbounds     sshproxy.Outbounds
-	attestationInboundPorts map[int]int
-	kubernetesInboundPorts  map[int]int
+	attestationInboundPorts map[string]string
+	kubernetesInboundPorts  map[string]string
 }
 
 func PpSecretName(sid string) string {
@@ -50,7 +50,7 @@ func PpSecretName(sid string) string {
 	return "pp-fake"
 }
 
-func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []int) (*SshClient, error) {
+func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string) (*SshClient, error) {
 	kubemgr.InitKubeMgr()
 
 	// Read WN Secret
@@ -82,8 +82,8 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	return sshClient, nil
 }
 
-func (ci *SshClientInstance) GetInPorts() []int {
-	ports := []int{}
+func (ci *SshClientInstance) GetInPorts() []string {
+	ports := []string{}
 	for _, inPort := range ci.attestationInboundPorts {
 		ports = append(ports, inPort)
 	}
@@ -93,14 +93,14 @@ func (ci *SshClientInstance) GetInPorts() []int {
 	return ports
 }
 
-func (ci *SshClientInstance) GetPort(outPort int) int {
+func (ci *SshClientInstance) GetPort(outPort string) string {
 	var ok bool
-	var inPort int
+	var inPort string
 	inPort, ok = ci.kubernetesInboundPorts[outPort]
 	if !ok {
 		inPort, ok = ci.attestationInboundPorts[outPort]
 		if !ok {
-			return 0
+			return ""
 		}
 	}
 	return inPort
@@ -153,8 +153,8 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 		sshClient:               c,
 		ctx:                     ctx,
 		cancel:                  cancel,
-		attestationInboundPorts: make(map[int]int),
-		kubernetesInboundPorts:  make(map[int]int),
+		attestationInboundPorts: make(map[string]string),
+		kubernetesInboundPorts:  make(map[string]string),
 	}
 
 	for _, outPort := range c.attestationPhaseInbounds {
