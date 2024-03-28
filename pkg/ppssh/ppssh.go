@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
 	"github.com/davidhadas/sec-peer-pods/pkg/sshutil"
@@ -19,12 +18,14 @@ import (
 
 const (
 	PROVEN_PP_PRIVATE_KEY_PATH  = "/tmp/provenPpPrivateKey"
-	PROVEN_TE_PUBLIC_KEY_PATH   = "/tmp/provenTePublicKey"
-	UNPROVEN_TE_PUBLIC_KEY_PATH = "/tmp/unprovenTePublicKey"
+	PROVEN_WN_PUBLIC_KEY_PATH   = "/tmp/provenTePublicKey"
+	UNPROVEN_WN_PUBLIC_KEY_PATH = "/tmp/unprovenTePublicKey"
 	SIGNELTON_PATH              = "/tmp/sshSingleton"
+	PP_PRIVATE_KEY              = "pp-fake/privateKey"
+	WN_PUBLIC_KEY               = "sshclient/publicKey"
 )
 
-func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {
+func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds, ppSecrets *PpSecrets) {
 	log.Printf("waiting for Kubernetes client to connect\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -39,7 +40,7 @@ func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshpr
 		//defer cancel()
 
 		log.Printf("Kubernetes client connected\n")
-		peer, err = KubernetesSShService(ctx, nConn)
+		peer, err = KubernetesSShService(ctx, nConn, ppSecrets)
 		if err != nil {
 			log.Printf("Failed k8sPhase: %s", err)
 			peer = nil
@@ -56,7 +57,7 @@ func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshpr
 	}
 }
 
-func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds) {
+func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds, ppSecrets *PpSecrets) {
 	// Singleton - accept an unproven connection for attestation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -82,12 +83,16 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 	if err := peer.AddInbounds(inbounds); err != nil {
 		log.Fatal("failed to add Inbounds during Attestation Phase: ", err)
 	}
+	ppSecrets.AddKey(WN_PUBLIC_KEY)
+	ppSecrets.AddKey(PP_PRIVATE_KEY)
+	ppSecrets.Go() // wait for the keys
+
 	// wait for a provenPpPrivateKey
-	WaitForProvenKeys(ctx, peer)
-	peer.Wait()
+	//WaitForProvenKeys(ctx, peer)
+	//peer.Wait()
 }
 
-func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string) {
+func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string, getSecret GetSecret) {
 	Singleton()
 	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
 	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
@@ -113,10 +118,12 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	if err != nil {
 		log.Fatal("failed to listen for connection: ", err)
 	}
+	ppSecrets := NewPpSecrets(getSecret)
+
 	go func() {
-		attestationPhase(listener, attestation_inbounds, attestation_outbounds)
+		attestationPhase(listener, attestation_inbounds, attestation_outbounds, ppSecrets)
 		for {
-			k8sPhase(listener, k8s_inbounds, k8s_outbounds)
+			k8sPhase(listener, k8s_inbounds, k8s_outbounds, ppSecrets)
 		}
 	}()
 }
@@ -133,55 +140,11 @@ func Singleton() {
 	singleton.Close()
 }
 
-func WaitForProvenKeys(ctx context.Context, peer *sshproxy.SshPeer) {
-	go func() {
-		ticker := time.NewTicker(200 * time.Millisecond)
-	OUT:
-		for {
-			select {
-			case <-ticker.C:
-				if key, err := os.ReadFile(PROVEN_PP_PRIVATE_KEY_PATH); err != nil || len(key) == 0 {
-					continue
-				}
-				if key, err := os.ReadFile(PROVEN_TE_PUBLIC_KEY_PATH); err != nil || len(key) == 0 {
-					continue
-				}
-
-				log.Printf("Found files %s, %s", PROVEN_PP_PRIVATE_KEY_PATH, PROVEN_TE_PUBLIC_KEY_PATH)
-
-				peer.Close("Found proven files")
-				break OUT
-			case <-ctx.Done():
-				break OUT
-			}
-		}
-		ticker.Stop()
-	}()
-}
-
-func getKubernetesPhaseKeys() (ppPrivateKeyBytes []byte, tePublicKeyBytes []byte) {
-	var err error
-
-	ppPrivateKeyBytes, err = os.ReadFile(PROVEN_PP_PRIVATE_KEY_PATH)
-	if err != nil {
-		log.Fatalf("SSH Server failed to get PP Private Key from %s, err: %v", PROVEN_PP_PRIVATE_KEY_PATH, err)
-	}
-
-	// Kubernetes Phase  - must have WN proven tePublicKeyBytes and ppPrivateKeyBytes
-	tePublicKeyBytes, err = os.ReadFile(PROVEN_TE_PUBLIC_KEY_PATH)
-	if err != nil {
-		log.Fatalf("SSH Server failed to get WN Public Key from %s, err: %v", PROVEN_TE_PUBLIC_KEY_PATH, err)
-	}
-
-	log.Printf("SSH Server initialized keys for Kubernetes Phase")
-	return
-}
-
 func getAttestationPhaseKeys() (ppPrivateKeyBytes []byte, tePublicKeyBytes []byte) {
 	var err error
 
 	// Attestation Phase - may have unproven tePublicKeyBytes
-	tePublicKeyBytes, err = os.ReadFile(UNPROVEN_TE_PUBLIC_KEY_PATH)
+	tePublicKeyBytes, err = os.ReadFile(UNPROVEN_WN_PUBLIC_KEY_PATH)
 	if err != nil {
 		tePublicKeyBytes = nil
 	}
@@ -247,22 +210,25 @@ func InitAttestationPhaseSshConfig() *ssh.ServerConfig {
 	return config
 }
 
-func InitKubernetesPhaseSshConfig() *ssh.ServerConfig {
+func InitKubernetesPhaseSshConfig(ppSecrets *PpSecrets) *ssh.ServerConfig {
 	config := &ssh.ServerConfig{}
 
-	ppPrivateKeyBytes, tePublicKeyBytes := getKubernetesPhaseKeys()
+	ppPrivateKeyBytes := ppSecrets.GetKey(PP_PRIVATE_KEY)
+	wnPublicKeyBytes := ppSecrets.GetKey(WN_PUBLIC_KEY)
+	//ppPrivateKeyBytes, wnPublicKeyBytes := getKubernetesPhaseKeys()
 
-	if ppPrivateKeyBytes == nil || tePublicKeyBytes == nil || len(ppPrivateKeyBytes) == 0 || len(tePublicKeyBytes) == 0 { // connect with an client public key
+	if ppPrivateKeyBytes == nil || wnPublicKeyBytes == nil || len(ppPrivateKeyBytes) == 0 || len(wnPublicKeyBytes) == 0 { // connect with an client public key
 		log.Fatalf("Kubernetes Phase missing SSH Server key") // should never happen
 	}
-	setPublicKey(config, tePublicKeyBytes)
+	setPublicKey(config, wnPublicKeyBytes)
 	setConfigHostKey(config, ppPrivateKeyBytes)
 	return config
 }
 
-func KubernetesSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPeer, error) {
+func KubernetesSShService(ctx context.Context, nConn net.Conn, ppSecrets *PpSecrets) (*sshproxy.SshPeer, error) {
 	log.Printf("Kubernetes Phase connected")
-	kubernetesPhaseConfig := InitKubernetesPhaseSshConfig()
+
+	kubernetesPhaseConfig := InitKubernetesPhaseSshConfig(ppSecrets)
 	// Handshake on the incoming net.Conn.
 	conn, chans, sshReqs, err := ssh.NewServerConn(nConn, kubernetesPhaseConfig)
 	if err != nil {
