@@ -100,7 +100,7 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 		attestation_outbounds.Add(outPort)
 	}
 	for _, outPort := range kubernetesInbounds {
-		if err := attestation_inbounds.Add(outPort, outPort); err != nil {
+		if err := k8s_inbounds.Add(outPort, outPort); err != nil {
 			log.Fatalf("Failed to open port %s:  %v", outPort, err)
 		}
 	}

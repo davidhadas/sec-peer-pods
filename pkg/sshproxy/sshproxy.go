@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -43,11 +44,14 @@ type Inbounds struct {
 func (outbounds *Outbounds) Add(out string) {
 	_, port, err := net.SplitHostPort(out)
 	if err != nil {
-		out = ":" + port
+		out = ":" + out
 		_, port, err = net.SplitHostPort(out)
 		if err != nil {
 			log.Fatalf("outbound Add '%s' - Err: %v", out, err)
 		}
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		log.Fatalf("outbound Add Port '%s' - Err: %v", port, err)
 	}
 
 	outbound := &Outbound{
@@ -127,9 +131,6 @@ func (peer *SshPeer) Close(who string) {
 	if peer.terminated == "" {
 		log.Printf("Peer Done by >>> %s <<<", who)
 		peer.terminated = who
-		for inPort := range peer.inbounds {
-			peer.DelInbound(inPort)
-		}
 		peer.sshConn.Close()
 		for inPort := range peer.inbounds {
 			peer.DelInbound(inPort)
