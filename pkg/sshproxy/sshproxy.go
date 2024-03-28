@@ -50,7 +50,8 @@ func (outbounds *Outbounds) Add(out string) {
 			log.Fatalf("outbound Add '%s' - Err: %v", out, err)
 		}
 	}
-	if _, err := strconv.Atoi(port); err != nil {
+
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
 		log.Fatalf("outbound Add Port '%s' - Err: %v", port, err)
 	}
 
