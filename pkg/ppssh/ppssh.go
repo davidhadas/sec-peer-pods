@@ -96,21 +96,21 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	Singleton()
 	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
 	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
-	for _, outPort := range attestationInbounds {
-		if err := attestation_inbounds.Add(outPort, outPort); err != nil {
-			log.Fatalf("Failed to open port %s:  %v", outPort, err)
+	for _, tag := range attestationInbounds {
+		if err := attestation_inbounds.Add(tag); err != nil {
+			log.Fatalf("Failed to open port %s:  %v", tag, err)
 		}
 	}
-	for _, outPort := range attestationOutbounds {
-		attestation_outbounds.Add(outPort)
+	for _, tag := range attestationOutbounds {
+		attestation_outbounds.Add(tag)
 	}
-	for _, outPort := range kubernetesInbounds {
-		if err := k8s_inbounds.Add(outPort, outPort); err != nil {
-			log.Fatalf("Failed to open port %s:  %v", outPort, err)
+	for _, tag := range kubernetesInbounds {
+		if err := k8s_inbounds.Add(tag); err != nil {
+			log.Fatalf("Failed to open port %s:  %v", tag, err)
 		}
 	}
-	for _, outPort := range kubernetesOutbounds {
-		k8s_outbounds.Add(outPort)
+	for _, tag := range kubernetesOutbounds {
+		k8s_outbounds.Add(tag)
 	}
 
 	log.Printf("SSH Service starting 0.0.0.0:%s\n", sshutil.SSHPORT)

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
@@ -82,6 +83,7 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	return sshClient, nil
 }
 
+/*
 func (ci *SshClientInstance) GetInPorts() []string {
 	ports := []string{}
 	for _, inPort := range ci.attestationInboundPorts {
@@ -92,13 +94,14 @@ func (ci *SshClientInstance) GetInPorts() []string {
 	}
 	return ports
 }
+*/
 
-func (ci *SshClientInstance) GetPort(outPort string) string {
+func (ci *SshClientInstance) GetPort(name string) string {
 	var ok bool
 	var inPort string
-	inPort, ok = ci.kubernetesInboundPorts[outPort]
+	inPort, ok = ci.kubernetesInboundPorts[name]
 	if !ok {
-		inPort, ok = ci.attestationInboundPorts[outPort]
+		inPort, ok = ci.attestationInboundPorts[name]
 		if !ok {
 			return ""
 		}
@@ -157,25 +160,27 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 		kubernetesInboundPorts:  make(map[string]string),
 	}
 
-	for _, outPort := range c.attestationPhaseInbounds {
+	for _, tag := range c.attestationPhaseInbounds {
 		inPort := sshutil.GetRandomPort()
-		for ci.attestationInbounds.Add(outPort, inPort) != nil {
+		for ci.attestationInbounds.Add(tag) != nil {
 			inPort = sshutil.GetRandomPort()
 		}
-		ci.kubernetesInboundPorts[outPort] = inPort
+		splits := strings.Split(tag, ":")
+		ci.attestationInboundPorts[splits[0]] = inPort
 	}
-	for _, outPort := range c.attestationPhaseOutbounds {
-		ci.attestationOutbounds.Add(outPort)
+	for _, tag := range c.attestationPhaseOutbounds {
+		ci.attestationOutbounds.Add(tag)
 	}
-	for _, outPort := range c.kubernetesPhaseInbounds {
+	for _, tag := range c.kubernetesPhaseInbounds {
 		inPort := sshutil.GetRandomPort()
-		for ci.kubernetesInbounds.Add(outPort, inPort) != nil {
+		for ci.kubernetesInbounds.Add(tag) != nil {
 			inPort = sshutil.GetRandomPort()
 		}
-		ci.kubernetesInboundPorts[outPort] = inPort
+		splits := strings.Split(tag, ":")
+		ci.kubernetesInboundPorts[splits[0]] = inPort
 	}
-	for _, outPort := range c.kubernetesPhaseOutbounds {
-		ci.kubernetesOutbounds.Add(outPort)
+	for _, tag := range c.kubernetesPhaseOutbounds {
+		ci.kubernetesOutbounds.Add(tag)
 	}
 
 	return ci

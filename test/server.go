@@ -3,12 +3,11 @@ package test
 import (
 	"fmt"
 	"net"
-	"strconv"
 )
 
-func Server(port int) {
-	// Listen for incoming connections on port 8080
-	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
+func Server(port string) {
+	// Listen for incoming connections on port
+	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -27,7 +26,7 @@ func Server(port int) {
 	}
 }
 
-func handleConnection(conn net.Conn, port int) {
+func handleConnection(conn net.Conn, port string) {
 	// Close the connection when we're done
 	defer conn.Close()
 	for {
@@ -41,12 +40,12 @@ func handleConnection(conn net.Conn, port int) {
 		}
 
 		// Print the incoming data
-		fmt.Printf("Received: %s port %d\n", buf, port)
+		fmt.Printf("Received: %s port %s\n", buf, port)
 		_, err = conn.Write(buf)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		fmt.Printf("Written: %s port %d\n", buf, port)
+		fmt.Printf("Written: %s port %s\n", buf, port)
 	}
 }

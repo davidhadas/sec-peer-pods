@@ -8,7 +8,7 @@ import (
 
 func Client(port string) {
 	// Connect to the server
-	conn, err := net.Dial("tcp", "localhost:"+port)
+	conn, err := net.Dial("tcp", "127.0.0.1:"+port)
 	if err != nil {
 		fmt.Println(err)
 		return

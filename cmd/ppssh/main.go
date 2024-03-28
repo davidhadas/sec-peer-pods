@@ -19,10 +19,12 @@ func main() {
 	os.Remove(ppssh.UNPROVEN_WN_PUBLIC_KEY_PATH)
 	os.Remove(ppssh.SIGNELTON_PATH)
 
-	go test.Server(7100)
+	go test.HttpServer("7111")
 
-	ppssh.InitSshServer([]string{"7000"}, []string{}, []string{"6443", "9053"}, []string{"7100"}, ppssh.GetSecret(getKey))
+	ppssh.InitSshServer([]string{"KBS:7000"}, []string{}, []string{"KUBEAPI:6443", "DNS:9053"}, []string{"KATAAPI:127.0.0.1:7111"}, ppssh.GetSecret(getKey))
+	//ppssh.InitSshServer([]string{"KBS:7000"}, []string{}, []string{}, []string{}, ppssh.GetSecret(getKey))
 
+	go test.HttpClient("http://127.0.0.1:7000/")
 	time.Sleep(30 * time.Second)
 
 	sid := "myppid"
