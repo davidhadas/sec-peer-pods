@@ -134,6 +134,7 @@ func NewSshPeer(ctx context.Context, phase string, sshConn ssh.Conn, chans <-cha
 				name := string(ch.ExtraData())
 				outbound := peer.outbounds[name]
 				if outbound == nil {
+					log.Printf("%s Phase: NewSshPeer rejected tunnel channel: %s", phase, name)
 					ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("%s Phase: NewSshPeer rejected tunnel channel  - port not allowed: %s", phase, name))
 					continue
 				}
