@@ -272,35 +272,37 @@ func (outbound *Outbound) acceptProxy(chChan ssh.Channel, chReqs <-chan *ssh.Req
 	// The proxy is a Handler - it has a ServeHTTP method
 	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
 	proxy.Transport = http.DefaultTransport
-	log.Printf("Setting up acceptProxy for sid %s", sid)
+	log.Printf("acceptProxy Setting up for sid %s", sid)
 
 	go ssh.DiscardRequests(chReqs)
 	go func() {
-		bior := bufio.NewReader(chChan)
-		req, err := http.ReadRequest(bior)
-		if err != nil {
-			log.Printf("Error in proxy ReadRequest: %v", err)
-			chChan.Close()
-			return
-		}
-		req.URL.Path = SID(sid).urlModifier(req.URL.Path)
-		req.URL.Scheme = "http"
-		req.URL.Host = outbound.OutAddr
-		log.Printf("acceptProxy modified URL to %s of host %s", req.URL.Path, req.URL.Host)
+		for {
+			bior := bufio.NewReader(chChan)
+			req, err := http.ReadRequest(bior)
+			if err != nil {
+				log.Printf("acceptProxy Error in proxy ReadRequest: %v", err)
+				chChan.Close()
+				return
+			}
+			req.URL.Path = SID(sid).urlModifier(req.URL.Path)
+			req.URL.Scheme = "http"
+			req.URL.Host = outbound.OutAddr
+			log.Printf("acceptProxy modified URL to %s of host %s", req.URL.Path, req.URL.Host)
 
-		resp, err := proxy.Transport.RoundTrip(req)
-		if err != nil {
-			log.Printf("Error in proxy.Transport.RoundTrip: %v", err)
-			chChan.Close()
-			return
+			resp, err := proxy.Transport.RoundTrip(req)
+			if err != nil {
+				log.Printf("acceptProxy Error in proxy.Transport.RoundTrip: %v", err)
+				chChan.Close()
+				return
+			}
+			err = resp.Write(chChan)
+			if err != nil {
+				log.Printf("acceptProxy Error in proxy resp.Write: %v", err)
+				chChan.Close()
+				return
+			}
+			log.Printf("acceptProxy received a response for %s", req.URL.Path)
 		}
-		err = resp.Write(chChan)
-		if err != nil {
-			log.Printf("Error in proxy resp.Write: %v", err)
-			chChan.Close()
-			return
-		}
-		log.Printf("acceptProxy received a response for %s", req.URL.Path)
 	}()
 }
 
