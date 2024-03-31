@@ -80,13 +80,16 @@ func (outbounds *Outbounds) Add(tag string) {
 	}
 	outbounds.list = append(outbounds.list, outbound)
 }
-func (inbounds *Inbounds) Add(tag string) error {
+func (inbounds *Inbounds) Add(tag string, forceInPort string) error {
 	splits := strings.Split(tag, ":")
 	if len(splits) != 2 {
 		return fmt.Errorf("Inbound Add wrong Tag: %s", tag)
 	}
 	name := splits[0]
 	inPort := splits[1]
+	if forceInPort != "" {
+		inPort = forceInPort
+	}
 
 	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("127.0.0.1:%s", inPort))
 	if err != nil {

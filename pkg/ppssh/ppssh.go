@@ -98,7 +98,7 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
 	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
 	for _, tag := range attestationInbounds {
-		if err := attestation_inbounds.Add(tag); err != nil {
+		if err := attestation_inbounds.Add(tag, ""); err != nil {
 			log.Fatalf("Attastation Phase: Failed to open port %s:  %v", tag, err)
 		}
 	}
@@ -106,7 +106,7 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 		attestation_outbounds.Add(tag)
 	}
 	for _, tag := range kubernetesInbounds {
-		if err := k8s_inbounds.Add(tag); err != nil {
+		if err := k8s_inbounds.Add(tag, ""); err != nil {
 			log.Fatalf("Kubernetes Phase: Failed to open port %s:  %v", tag, err)
 		}
 	}

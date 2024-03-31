@@ -153,7 +153,7 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 
 	for _, tag := range c.attestationPhaseInbounds {
 		inPort := sshutil.GetRandomPort()
-		for ci.attestationInbounds.Add(tag) != nil {
+		for ci.attestationInbounds.Add(tag, inPort) != nil {
 			inPort = sshutil.GetRandomPort()
 		}
 		splits := strings.Split(tag, ":")
@@ -164,7 +164,7 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 	}
 	for _, tag := range c.kubernetesPhaseInbounds {
 		inPort := sshutil.GetRandomPort()
-		for ci.kubernetesInbounds.Add(tag) != nil {
+		for ci.kubernetesInbounds.Add(tag, inPort) != nil {
 			inPort = sshutil.GetRandomPort()
 		}
 		splits := strings.Split(tag, ":")
