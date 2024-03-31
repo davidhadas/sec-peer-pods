@@ -2,22 +2,35 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/netip"
+	"strings"
 	"time"
 
+	"github.com/davidhadas/sec-peer-pods/pkg/ppssh"
 	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
 	"github.com/davidhadas/sec-peer-pods/pkg/wnssh"
 	"github.com/davidhadas/sec-peer-pods/test"
 )
 
+type SID string
+
+func (sid SID) urlModifier(path string) string {
+	if strings.HasSuffix(path, ppssh.PP_PRIVATE_KEY) {
+		return strings.Replace(path, ppssh.PP_SID, fmt.Sprintf("pp-%s/", sid), 1)
+	}
+	return path
+}
+
 func main() {
-	sid := "myppid"                           // SID
+	// This sid should come from create container request
+	sid := "fake"                             // SID
 	ipAddr, _ := netip.ParseAddr("127.0.0.1") // ipAddr of the VM
 	ipAddrs := []netip.Addr{ipAddr}
 
 	go test.HttpServer("7777")
-	sshproxy.StartProxy("http://127.0.0.1:7777/", "7070")
+	sshproxy.StartProxy("http://127.0.0.1:7777/", "7070", SID(sid).urlModifier)
 	///////// Adaptor Initialization when SSH is enabled
 
 	sshClient, err := wnssh.InitSshClient([]string{}, []string{"KBS:7070"}, []string{"KATAAPI:7100"}, []string{"KUBEAPI:6443", "DNS:9053"})

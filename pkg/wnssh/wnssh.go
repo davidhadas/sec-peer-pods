@@ -46,9 +46,7 @@ type SshClientInstance struct {
 }
 
 func PpSecretName(sid string) string {
-	//return "pp-" + sid
-	log.Printf("Using fake secrets << DEVELOPMENT ONLY! >>")
-	return "pp-fake"
+	return "pp-" + sid
 }
 
 func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string) (*SshClient, error) {
@@ -133,6 +131,10 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 		}
 	}
 
+	// >>> Update the KBS about the SID's Secret !!! <<<
+	// >>>  TBD TBD TBD
+	// >>>
+
 	var serverSshPublicKeyBytes []byte
 
 	if len(publicKey) > 0 {
@@ -189,11 +191,11 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 func (ci *SshClientInstance) Start() error {
 	if !ci.k8sPhase {
 		// Attestation Phase
-		log.Println("Starting Attstation Phase")
+		log.Println("Attstation Phase: Starting")
 		if err := ci.StartAttestation(); err != nil {
-			return fmt.Errorf("failed StartAttestation: %v", err)
+			return fmt.Errorf("attstation Phase failed: %v", err)
 		}
-		log.Println("Attstation Phase Done")
+		log.Println("Attstation Phase: Done")
 		ci.k8sPhase = true
 	}
 
@@ -203,12 +205,12 @@ func (ci *SshClientInstance) Start() error {
 		for {
 			select {
 			case <-ci.ctx.Done():
-				log.Printf("Connect VM Done")
+				log.Printf("Kubernetes Phase: Connect VM Done")
 				return
 			default:
-				log.Printf("Starting Kubernetes Phase (Number of restarts %d)", restarts)
+				log.Printf("Kubernetes Phase: Starting (Number of restarts %d)", restarts)
 				if err := ci.StartKubernetes(); err != nil {
-					log.Printf("failed during StartKubernetes: %v", err)
+					log.Printf("Kubernetes Phase: failed: %v", err)
 				}
 				time.Sleep(time.Second)
 				restarts += 1
@@ -221,10 +223,10 @@ func (ci *SshClientInstance) Start() error {
 func (ci *SshClientInstance) StartKubernetes() error {
 	ctx, cancel := context.WithCancel(ci.ctx)
 
-	peer := ci.StartSshClient(ctx, ci.publicKey)
+	peer := ci.StartSshClient(ctx, "Kubernetes", ci.publicKey)
 	if peer == nil {
 		cancel()
-		return fmt.Errorf("failed StartSshClient")
+		return fmt.Errorf("Kubernetes Phase: failed StartSshClient")
 	}
 
 	peer.AddOutbounds(ci.kubernetesOutbounds)
@@ -244,10 +246,10 @@ func (ci *SshClientInstance) StartKubernetes() error {
 func (ci *SshClientInstance) StartAttestation() error {
 	ctx, cancel := context.WithCancel(ci.ctx)
 
-	peer := ci.StartSshClient(ctx, nil)
+	peer := ci.StartSshClient(ctx, "Attestation", nil)
 	if peer == nil {
 		cancel()
-		return fmt.Errorf("failed StartSshClient")
+		return fmt.Errorf("Attestation Phase: failed StartSshClient")
 	}
 	peer.AddOutbounds(ci.attestationOutbounds)
 	err := peer.AddInbounds(ci.attestationInbounds)
@@ -264,18 +266,18 @@ func (ci *SshClientInstance) StartAttestation() error {
 	return nil
 }
 
-func (ci *SshClientInstance) StartSshClient(ctx context.Context, publicKey []byte) *sshproxy.SshPeer {
+func (ci *SshClientInstance) StartSshClient(ctx context.Context, phase string, publicKey []byte) *sshproxy.SshPeer {
 	config := &ssh.ClientConfig{
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			if len(publicKey) == 0 {
-				log.Printf("ssh Client skip validating server's HOST KEY (%s) during attestation", key.Type())
+				log.Printf("%s Phase: ssh Client skip validating server's HOST KEY (%s) during attestation", phase, key.Type())
 				return nil
 			}
 			if !bytes.Equal(key.Marshal(), ci.publicKey) {
-				log.Printf("ssh Client HOST KEY mismatch - %s", key.Type())
-				return fmt.Errorf("ssh: host key mismatch")
+				log.Printf("%s Phase: ssh Client HOST KEY mismatch - %s", phase, key.Type())
+				return fmt.Errorf("%s Phase: ssh host key mismatch", phase)
 			}
-			log.Printf("ssh Client HOST KEY match - %s", key.Type())
+			log.Printf("%s Phase: ssh Client HOST KEY match - %s", phase, key.Type())
 			return nil
 		},
 		HostKeyAlgorithms: []string{"rsa-sha2-256", "rsa-sha2-512"},
@@ -292,17 +294,17 @@ func (ci *SshClientInstance) StartSshClient(ctx context.Context, publicKey []byt
 		for _, ppAddr := range ci.ppAddr {
 			conn, err := net.DialTimeout("tcp", ppAddr, config.Timeout)
 			if err != nil {
-				log.Printf("unable to Dial %s: %v", ppAddr, err)
+				log.Printf("%s Phase: unable to Dial %s: %v", phase, ppAddr, err)
 				continue
 			}
-			log.Printf("ssh Client connected - %s", conn.RemoteAddr())
+			log.Printf("%s Phase: ssh Client connected - %s", phase, conn.RemoteAddr())
 			netConn, chans, sshReqs, err := ssh.NewClientConn(conn, ppAddr, config)
 			if err != nil {
-				log.Printf("unable to connect: %v", err)
+				log.Printf("%s Phase: unable to connect: %v", phase, err)
 				conn.Close()
 				continue
 			}
-			return sshproxy.NewSshPeer(ctx, netConn, chans, sshReqs)
+			return sshproxy.NewSshPeer(ctx, phase, netConn, chans, sshReqs)
 		}
 		time.Sleep(delay)
 		delay *= 2

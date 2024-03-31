@@ -16,6 +16,7 @@ import (
 )
 
 type SshPeer struct {
+	phase      string
 	terminated string
 	sshConn    ssh.Conn
 	ctx        context.Context
@@ -99,8 +100,9 @@ func (inbounds *Inbounds) Add(tag string) error {
 }
 
 // NewSshPeer
-func NewSshPeer(ctx context.Context, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
+func NewSshPeer(ctx context.Context, phase string, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
 	peer := &SshPeer{
+		phase:     phase,
 		sshConn:   sshConn,
 		ctx:       ctx,
 		done:      make(chan bool, 1),
@@ -118,26 +120,26 @@ func NewSshPeer(ctx context.Context, sshConn ssh.Conn, chans <-chan ssh.NewChann
 		for ch := range chans {
 			switch ch.ChannelType() {
 			default:
-				log.Printf("NewSshPeer rejected channel for %s", ch.ChannelType())
+				log.Printf("%s Phase: NewSshPeer rejected channel for %s", phase, ch.ChannelType())
 				ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %v", ch.ChannelType()))
 			case "tunnel":
 				name := string(ch.ExtraData())
 				outbound := peer.outbounds[name]
 				if outbound == nil {
-					ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("NewSshPeer rejected tunnel channel  - port not allowed: %s", name))
+					ch.Reject(ssh.UnknownChannelType, fmt.Sprintf("%s Phase: NewSshPeer rejected tunnel channel  - port not allowed: %s", phase, name))
 					continue
 				}
 				chChan, chReqs, err := ch.Accept()
 				if err != nil {
-					log.Printf("NewSshPeer failed to accept tunnel channel: %s", err)
+					log.Printf("%s Phase: NewSshPeer failed to accept tunnel channel: %s", phase, err)
 					peer.Close("Accept failed")
 				}
-				log.Printf("NewSshPeer  - peer requested a tunnel channel for %s", name)
+				log.Printf("%s Phase: NewSshPeer  - peer requested a tunnel channel for %s", phase, name)
 				outbound.accept(chChan, chReqs)
 
 			}
 		}
-		log.Printf("Ssh chans channel closed")
+		log.Printf("%s Phase: Ssh chans channel closed", phase)
 		peer.Close("Chans gorutine terminated") // signal done in case termination happened in peer
 	}()
 	return peer
@@ -149,7 +151,7 @@ func (peer *SshPeer) Wait() {
 
 func (peer *SshPeer) Close(who string) {
 	if peer.terminated == "" {
-		log.Printf("Peer Done by >>> %s <<<", who)
+		log.Printf("%s Phase: Peer Done by >>> %s <<<", peer.phase, who)
 		peer.terminated = who
 		peer.sshConn.Close()
 		for inPort := range peer.inbounds {
@@ -165,12 +167,12 @@ func (peer *SshPeer) AddInbound(inbound *Inbound) error {
 		for {
 			tcpConn, err := inbound.TcpListener.Accept()
 			if err != nil {
-				log.Printf("Inbound Accept error: %s - shutdown ssh", err)
+				log.Printf("%s Phase: Inbound Accept error: %s - shutdown ssh", peer.phase, err)
 				peer.sshConn.Close()                            // Shutdown other side
 				peer.Close("inbound.tcpListener.Accept failed") // Shutdown this peer
 				return
 			}
-			log.Printf("Inbound Accept: %s", inbound.Name)
+			log.Printf("%s Phase: Inbound Accept: %s", peer.phase, inbound.Name)
 			NewInboundInstance(tcpConn, peer, inbound)
 		}
 	}()
@@ -187,25 +189,24 @@ func (peer *SshPeer) DelInbound(inPort string) {
 }
 
 func NewInboundInstance(tcpConn io.ReadWriteCloser, peer *SshPeer, inbound *Inbound) {
-
 	sshChan, channelReqs, err := peer.sshConn.OpenChannel("tunnel", []byte(inbound.Name))
 	if err != nil {
-		log.Printf("NewInboundInstance OpenChannel %s error: %s", inbound.Name, err)
+		log.Printf("%s Phase: NewInboundInstance OpenChannel %s error: %s", peer.phase, inbound.Name, err)
 		return
 	}
-	log.Printf("NewInboundInstance OpenChannel opening tunnel for: %s", inbound.Name)
+	log.Printf("%s Phase: NewInboundInstance OpenChannel opening tunnel for: %s", peer.phase, inbound.Name)
 	go ssh.DiscardRequests(channelReqs)
 
 	go func() {
 		_, err = io.Copy(tcpConn, sshChan)
-		log.Printf("Inbound io.Copy from SSH ended on %s", inbound.Name)
+		log.Printf("%s Phase: Inbound io.Copy from SSH ended on %s", peer.phase, inbound.Name)
 		tcpConn.Close()
 		sshChan.Close()
 	}()
 
 	go func() {
 		_, err = io.Copy(sshChan, tcpConn)
-		log.Printf("Inbound io.Copy from TCP ended on %s", inbound.Name)
+		log.Printf("%s Phase: Inbound io.Copy from TCP ended on %s", peer.phase, inbound.Name)
 		sshChan.Close()
 		tcpConn.Close()
 	}()
@@ -267,7 +268,9 @@ func (outbound *Outbound) accept(chChan ssh.Channel, chReqs <-chan *ssh.Request)
 	}()
 }
 
-func StartProxy(remote string, localPort string) {
+type UrlModifier func(path string) string
+
+func StartProxy(remote string, localPort string, urlModifier UrlModifier) {
 
 	remoteUrl, err := url.Parse(remote)
 	if err != nil {
@@ -281,7 +284,7 @@ func StartProxy(remote string, localPort string) {
 	originalDirector := proxy.Director
 	proxy.Director = func(r *http.Request) {
 		originalDirector(r)
-		r.URL.Path = r.URL.Path + "xyz"
+		r.URL.Path = urlModifier(r.URL.Path)
 	}
 
 	// We listen for requests on port 80

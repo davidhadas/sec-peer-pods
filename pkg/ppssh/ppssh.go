@@ -21,7 +21,8 @@ const (
 	PROVEN_WN_PUBLIC_KEY_PATH   = "/tmp/provenTePublicKey"
 	UNPROVEN_WN_PUBLIC_KEY_PATH = "/tmp/unprovenTePublicKey"
 	SIGNELTON_PATH              = "/tmp/sshSingleton"
-	PP_PRIVATE_KEY              = "pp-fake/privateKey"
+	PP_SID                      = "pp-sid/"
+	PP_PRIVATE_KEY              = PP_SID + "privateKey"
 	WN_PUBLIC_KEY               = "sshclient/publicKey"
 )
 
@@ -64,13 +65,13 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 
 	var peer *sshproxy.SshPeer
 	for peer == nil {
-		log.Printf("waiting for Attestation client to connect\n")
+		log.Printf("Attastation Phase: waiting for client to connect\n")
 		nConn, err := listener.Accept()
 		if err != nil {
-			log.Fatal("failed to accept incoming connection (Attestation Phase): ", err)
+			log.Fatal("Attastation Phase: failed to accept incoming connection: ", err)
 		}
 
-		log.Printf("Attestation client connected\n")
+		log.Printf("Attastation Phase: client connected\n")
 
 		peer, err = AttestationSShService(ctx, nConn)
 		if err != nil {
@@ -81,7 +82,7 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 
 	peer.AddOutbounds(outbounds)
 	if err := peer.AddInbounds(inbounds); err != nil {
-		log.Fatal("failed to add Inbounds during Attestation Phase: ", err)
+		log.Fatal("Attastation Phase: failed to add Inbounds: ", err)
 	}
 	ppSecrets.AddKey(WN_PUBLIC_KEY)
 	ppSecrets.AddKey(PP_PRIVATE_KEY)
@@ -98,7 +99,7 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
 	for _, tag := range attestationInbounds {
 		if err := attestation_inbounds.Add(tag); err != nil {
-			log.Fatalf("Failed to open port %s:  %v", tag, err)
+			log.Fatalf("Attastation Phase: Failed to open port %s:  %v", tag, err)
 		}
 	}
 	for _, tag := range attestationOutbounds {
@@ -106,7 +107,7 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	}
 	for _, tag := range kubernetesInbounds {
 		if err := k8s_inbounds.Add(tag); err != nil {
-			log.Fatalf("Failed to open port %s:  %v", tag, err)
+			log.Fatalf("Kubernetes Phase: Failed to open port %s:  %v", tag, err)
 		}
 	}
 	for _, tag := range kubernetesOutbounds {
@@ -152,17 +153,17 @@ func getAttestationPhaseKeys() (ppPrivateKeyBytes []byte, tePublicKeyBytes []byt
 	// Private Key generation - unproven to the clinet, key is generated on the fly
 	ppPrivateKey, err := rsa.GenerateKey(rand.Reader, 3072)
 	if err != nil {
-		log.Fatalf("Failed to generate host key, err: %v", err)
+		log.Fatalf("Attastation Phase: Failed to generate host key, err: %v", err)
 	}
 
 	// Validate Private Key
 	err = ppPrivateKey.Validate()
 	if err != nil {
-		log.Fatalf("Failed to validate host key, err: %v", err)
+		log.Fatalf("Attastation Phase: Failed to validate host key, err: %v", err)
 	}
 
 	ppPrivateKeyBytes = sshutil.RsaPrivateKeyPEM(ppPrivateKey)
-	log.Printf("SSH Server initialized keys for Attastation Phase")
+	log.Printf("Attastation Phase: SSH Server initialized keys")
 	return
 }
 
@@ -204,7 +205,7 @@ func InitAttestationPhaseSshConfig() *ssh.ServerConfig {
 		setPublicKey(config, tePublicKeyBytes)
 	} else {
 		config.NoClientAuth = true
-		log.Printf("SSH Server Attestation Phase initialized with NoClientAuth")
+		log.Printf("Attastation Phase: SSH Server initialized with NoClientAuth")
 	}
 	setConfigHostKey(config, ppPrivateKeyBytes)
 	return config
@@ -218,7 +219,7 @@ func InitKubernetesPhaseSshConfig(ppSecrets *PpSecrets) *ssh.ServerConfig {
 	//ppPrivateKeyBytes, wnPublicKeyBytes := getKubernetesPhaseKeys()
 
 	if ppPrivateKeyBytes == nil || wnPublicKeyBytes == nil || len(ppPrivateKeyBytes) == 0 || len(wnPublicKeyBytes) == 0 { // connect with an client public key
-		log.Fatalf("Kubernetes Phase missing SSH Server key") // should never happen
+		log.Fatalf("Kubernetes Phase: missing SSH Server key") // should never happen
 	}
 	setPublicKey(config, wnPublicKeyBytes)
 	setConfigHostKey(config, ppPrivateKeyBytes)
@@ -226,45 +227,45 @@ func InitKubernetesPhaseSshConfig(ppSecrets *PpSecrets) *ssh.ServerConfig {
 }
 
 func KubernetesSShService(ctx context.Context, nConn net.Conn, ppSecrets *PpSecrets) (*sshproxy.SshPeer, error) {
-	log.Printf("Kubernetes Phase connected")
+	log.Printf("Kubernetes Phase: connected")
 
 	kubernetesPhaseConfig := InitKubernetesPhaseSshConfig(ppSecrets)
 	// Handshake on the incoming net.Conn.
 	conn, chans, sshReqs, err := ssh.NewServerConn(nConn, kubernetesPhaseConfig)
 	if err != nil {
-		log.Printf("Failed to handshake: %s", err)
+		log.Printf("Kubernetes Phase: Failed to handshake: %s", err)
 		return nil, err
 	}
 
 	if conn.Permissions != nil {
-		log.Printf("Logged in with key %s", conn.Permissions.Extensions["pubkey-fp"])
+		log.Printf("Kubernetes Phase: Logged in with key %s", conn.Permissions.Extensions["pubkey-fp"])
 	} else {
-		log.Printf("Logged in without key")
+		log.Printf("Kubernetes Phase: Logged in without key")
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, conn, chans, sshReqs)
+	peer := sshproxy.NewSshPeer(ctx, "Kubernetes", conn, chans, sshReqs)
 	return peer, nil
 }
 
 func AttestationSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPeer, error) {
-	log.Printf("Attestation Phase connected")
+	log.Printf("Attestation Phase: connected")
 	attestationPhaseConfig := InitAttestationPhaseSshConfig()
 	// Handshake on the incoming net.Conn.
 	conn, chans, sshReqs, err := ssh.NewServerConn(nConn, attestationPhaseConfig)
 	if err != nil {
-		err = fmt.Errorf("failed to handshake: %s", err)
+		err = fmt.Errorf("Attestation Phase: failed to handshake: %s", err)
 		return nil, err
 	}
 
 	if conn.Permissions != nil {
-		log.Printf("Logged in with key %s", conn.Permissions.Extensions["pubkey-fp"])
+		log.Printf("Attestation Phase: Logged in with key %s", conn.Permissions.Extensions["pubkey-fp"])
 	} else {
-		log.Printf("Logged in without key")
+		log.Printf("Attestation Phase: Logged in without key")
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, conn, chans, sshReqs)
+	peer := sshproxy.NewSshPeer(ctx, "Attestation", conn, chans, sshReqs)
 	return peer, nil
 }
 
