@@ -25,7 +25,7 @@ func main() {
 	//ppssh.InitSshServer([]string{"KBS:7000"}, []string{}, []string{}, []string{}, ppssh.GetSecret(getKey))
 
 	go test.HttpClient("http://127.0.0.1:7000/")
-	go test.HttpClient("http://127.0.0.1:7070/aaa/bbb/" + ppssh.PP_SID + "privateKey")
+	go test.HttpClient("http://127.0.0.1:7000/aaa/bbb/" + ppssh.PP_SID + "privateKey")
 
 	time.Sleep(30 * time.Second)
 

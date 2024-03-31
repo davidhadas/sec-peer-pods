@@ -244,7 +244,7 @@ func KubernetesSShService(ctx context.Context, nConn net.Conn, ppSecrets *PpSecr
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, "Kubernetes", conn, chans, sshReqs)
+	peer := sshproxy.NewSshPeer(ctx, "Kubernetes", conn, chans, sshReqs, "")
 	return peer, nil
 }
 
@@ -254,7 +254,7 @@ func AttestationSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPe
 	// Handshake on the incoming net.Conn.
 	conn, chans, sshReqs, err := ssh.NewServerConn(nConn, attestationPhaseConfig)
 	if err != nil {
-		err = fmt.Errorf("Attestation Phase: failed to handshake: %s", err)
+		err = fmt.Errorf("failed to handshake: %v", err)
 		return nil, err
 	}
 
@@ -265,7 +265,7 @@ func AttestationSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPe
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, "Attestation", conn, chans, sshReqs)
+	peer := sshproxy.NewSshPeer(ctx, "Attestation", conn, chans, sshReqs, "")
 	return peer, nil
 }
 

@@ -31,6 +31,7 @@ type SshClient struct {
 }
 
 type SshClientInstance struct {
+	sid                     string
 	publicKey               []byte
 	ppAddr                  []string
 	sshClient               *SshClient
@@ -153,6 +154,7 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 
 	ctx, cancel := context.WithCancel(ctx)
 	ci := &SshClientInstance{
+		sid:                     sid,
 		publicKey:               serverSshPublicKeyBytes,
 		ppAddr:                  ppAddr,
 		sshClient:               c,
@@ -223,7 +225,7 @@ func (ci *SshClientInstance) Start() error {
 func (ci *SshClientInstance) StartKubernetes() error {
 	ctx, cancel := context.WithCancel(ci.ctx)
 
-	peer := ci.StartSshClient(ctx, "Kubernetes", ci.publicKey)
+	peer := ci.StartSshClient(ctx, "Kubernetes", ci.publicKey, ci.sid)
 	if peer == nil {
 		cancel()
 		return fmt.Errorf("Kubernetes Phase: failed StartSshClient")
@@ -246,7 +248,7 @@ func (ci *SshClientInstance) StartKubernetes() error {
 func (ci *SshClientInstance) StartAttestation() error {
 	ctx, cancel := context.WithCancel(ci.ctx)
 
-	peer := ci.StartSshClient(ctx, "Attestation", nil)
+	peer := ci.StartSshClient(ctx, "Attestation", nil, ci.sid)
 	if peer == nil {
 		cancel()
 		return fmt.Errorf("Attestation Phase: failed StartSshClient")
@@ -266,7 +268,7 @@ func (ci *SshClientInstance) StartAttestation() error {
 	return nil
 }
 
-func (ci *SshClientInstance) StartSshClient(ctx context.Context, phase string, publicKey []byte) *sshproxy.SshPeer {
+func (ci *SshClientInstance) StartSshClient(ctx context.Context, phase string, publicKey []byte, sid string) *sshproxy.SshPeer {
 	config := &ssh.ClientConfig{
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			if len(publicKey) == 0 {
@@ -304,7 +306,7 @@ func (ci *SshClientInstance) StartSshClient(ctx context.Context, phase string, p
 				conn.Close()
 				continue
 			}
-			return sshproxy.NewSshPeer(ctx, phase, netConn, chans, sshReqs)
+			return sshproxy.NewSshPeer(ctx, phase, netConn, chans, sshReqs, sid)
 		}
 		time.Sleep(delay)
 		delay *= 2

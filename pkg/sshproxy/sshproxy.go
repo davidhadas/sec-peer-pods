@@ -1,6 +1,7 @@
 package sshproxy
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -15,7 +16,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const (
+	PP_SID         = "pp-sid/"
+	PP_PRIVATE_KEY = PP_SID + "privateKey"
+)
+
 type SshPeer struct {
+	sid        string
 	phase      string
 	terminated string
 	sshConn    ssh.Conn
@@ -100,8 +107,9 @@ func (inbounds *Inbounds) Add(tag string) error {
 }
 
 // NewSshPeer
-func NewSshPeer(ctx context.Context, phase string, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request) *SshPeer {
+func NewSshPeer(ctx context.Context, phase string, sshConn ssh.Conn, chans <-chan ssh.NewChannel, sshReqs <-chan *ssh.Request, sid string) *SshPeer {
 	peer := &SshPeer{
+		sid:       sid,
 		phase:     phase,
 		sshConn:   sshConn,
 		ctx:       ctx,
@@ -135,7 +143,11 @@ func NewSshPeer(ctx context.Context, phase string, sshConn ssh.Conn, chans <-cha
 					peer.Close("Accept failed")
 				}
 				log.Printf("%s Phase: NewSshPeer  - peer requested a tunnel channel for %s", phase, name)
-				outbound.accept(chChan, chReqs)
+				if outbound.Name == "KBS" {
+					outbound.acceptProxy(chChan, chReqs, sid)
+				} else {
+					outbound.accept(chChan, chReqs)
+				}
 
 			}
 		}
@@ -241,6 +253,57 @@ func (peer *SshPeer) DelOutbound(outPort string) {
 	delete(peer.outbounds, outPort)
 }
 
+type SID string
+
+func (sid SID) urlModifier(path string) string {
+	if strings.HasSuffix(path, PP_PRIVATE_KEY) {
+		return strings.Replace(path, PP_SID, fmt.Sprintf("pp-%s/", sid), 1)
+	}
+	return path
+}
+
+func (outbound *Outbound) acceptProxy(chChan ssh.Channel, chReqs <-chan *ssh.Request, sid string) {
+	remoteUrl, err := url.Parse("http://" + outbound.OutAddr)
+	if err != nil {
+		log.Printf("acceptProxy error parsing address %s: %v", outbound.OutAddr, err)
+		return
+	}
+
+	// The proxy is a Handler - it has a ServeHTTP method
+	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
+	proxy.Transport = http.DefaultTransport
+	log.Printf("Setting up acceptProxy for sid %s", sid)
+
+	go ssh.DiscardRequests(chReqs)
+	go func() {
+		bior := bufio.NewReader(chChan)
+		req, err := http.ReadRequest(bior)
+		if err != nil {
+			log.Printf("Error in proxy ReadRequest: %v", err)
+			chChan.Close()
+			return
+		}
+		req.URL.Path = SID(sid).urlModifier(req.URL.Path)
+		req.URL.Scheme = "http"
+		req.URL.Host = "127.0.0.1:7777"
+		log.Printf("acceptProxy modified URL to %s", req.URL.Path)
+
+		resp, err := proxy.Transport.RoundTrip(req)
+		if err != nil {
+			log.Printf("Error in proxy.Transport.RoundTrip: %v", err)
+			chChan.Close()
+			return
+		}
+		err = resp.Write(chChan)
+		if err != nil {
+			log.Printf("Error in proxy resp.Write: %v", err)
+			chChan.Close()
+			return
+		}
+		log.Printf("acceptProxy received a response for %s", req.URL.Path)
+	}()
+}
+
 func (outbound *Outbound) accept(chChan ssh.Channel, chReqs <-chan *ssh.Request) {
 	tcpConn, err := net.Dial("tcp", outbound.OutAddr)
 	if err != nil {
@@ -266,41 +329,4 @@ func (outbound *Outbound) accept(chChan ssh.Channel, chReqs <-chan *ssh.Request)
 		chChan.Close()
 		tcpConn.Close()
 	}()
-}
-
-type UrlModifier func(path string) string
-
-func StartProxy(remote string, localPort string, urlModifier UrlModifier) {
-
-	remoteUrl, err := url.Parse(remote)
-	if err != nil {
-		log.Printf("acceptProxy error parsing address %s: %v", remote, err)
-		return
-	}
-
-	// The proxy is a Handler - it has a ServeHTTP method
-	proxy := httputil.NewSingleHostReverseProxy(remoteUrl)
-
-	originalDirector := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		originalDirector(r)
-		r.URL.Path = urlModifier(r.URL.Path)
-	}
-
-	// We listen for requests on port 80
-	srv := http.Server{Addr: fmt.Sprintf("127.0.0.1:%s", localPort), Handler: proxy}
-
-	go func() {
-		err = srv.ListenAndServe()
-		if err != nil {
-			log.Printf("Error in proxy: %v", err)
-			return
-		}
-
-		log.Print("Stopped proxy")
-	}()
-
-	//ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	//defer cancel()
-	//reverseProxy.Shutdown(ctx)
 }
