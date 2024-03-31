@@ -82,19 +82,6 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	return sshClient, nil
 }
 
-/*
-func (ci *SshClientInstance) GetInPorts() []string {
-	ports := []string{}
-	for _, inPort := range ci.attestationInboundPorts {
-		ports = append(ports, inPort)
-	}
-	for _, inPort := range ci.kubernetesInboundPorts {
-		ports = append(ports, inPort)
-	}
-	return ports
-}
-*/
-
 func (ci *SshClientInstance) GetPort(name string) string {
 	var ok bool
 	var inPort string

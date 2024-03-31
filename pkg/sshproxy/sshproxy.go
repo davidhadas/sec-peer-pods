@@ -285,8 +285,8 @@ func (outbound *Outbound) acceptProxy(chChan ssh.Channel, chReqs <-chan *ssh.Req
 		}
 		req.URL.Path = SID(sid).urlModifier(req.URL.Path)
 		req.URL.Scheme = "http"
-		req.URL.Host = "127.0.0.1:7777"
-		log.Printf("acceptProxy modified URL to %s", req.URL.Path)
+		req.URL.Host = outbound.OutAddr
+		log.Printf("acceptProxy modified URL to %s of host %s", req.URL.Path, req.URL.Host)
 
 		resp, err := proxy.Transport.RoundTrip(req)
 		if err != nil {
