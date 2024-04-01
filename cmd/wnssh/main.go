@@ -17,13 +17,14 @@ func main() {
 	ipAddrs := []netip.Addr{ipAddr}
 
 	go test.HttpServer("7777")
+	go test.HttpServer("8888")
 
 	///////// Adaptor Initialization when SSH is enabled
 
 	sshClient, err := wnssh.InitSshClient([]string{}, []string{"KBS:7070"}, []string{"KATAAPI:7100"}, []string{"KUBEAPI:6443", "DNS:9053"})
 	//sshClient, err := wnssh.InitSshClient([]string{}, []string{"KBS:7070"}, []string{}, []string{})
 	if err != nil {
-		log.Printf("InitSshClient faield %v", err)
+		log.Printf("InitSshClient %v", err)
 		return
 	}
 

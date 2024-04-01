@@ -19,10 +19,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+const KBS_CLIENT_SECRET = "kbs-client"
 const ADAPTOR_SSH_SECRET = "sshclient"
 const SSH_PORT = ":2022"
 
 type SshClient struct {
+	kc                        *KbsClient
 	wnSigner                  *ssh.Signer
 	kubernetesPhaseInbounds   []string
 	kubernetesPhaseOutbounds  []string
@@ -71,7 +73,21 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 		return nil, fmt.Errorf("unable to parse private key: %v", err)
 	}
 
+	kbscPrivateKey, _, err := kubemgr.KubeMgr.ReadSecret(KBS_CLIENT_SECRET)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read KBS Client Secret: %w", err)
+	}
+
+	//kc := InitKbsClient("http://kbs-service.kbs-operator-system:8080/kbs/v0")
+	//kc := InitKbsClient("http://192.168.122.43:30507/kbs/v0")
+	kc := InitKbsClient("http://127.0.0.1:8888/kbs/v0")
+	err = kc.SetPemSecret(kbscPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("KbsClient - %v", err)
+	}
+
 	sshClient := &SshClient{
+		kc:                        kc,
 		wnSigner:                  &signer,
 		attestationPhaseInbounds:  attestationInbounds,
 		attestationPhaseOutbounds: attestationOutbounds,
@@ -106,13 +122,13 @@ func (ci *SshClientInstance) DisconnectPP(sid string) {
 
 func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr) *SshClientInstance {
 	// Create peerPod Secret named peerPodId
-	var publicKey []byte
+	var publicKey, privateKey []byte
 	var err error
 
 	// Try reading first in case we resume an existing PP
-	_, publicKey, err = kubemgr.KubeMgr.ReadSecret(PpSecretName(sid))
+	privateKey, publicKey, err = kubemgr.KubeMgr.ReadSecret(PpSecretName(sid))
 	if err != nil {
-		_, publicKey, err = kubemgr.KubeMgr.CreateSecret(PpSecretName(sid))
+		privateKey, publicKey, err = kubemgr.KubeMgr.CreateSecret(PpSecretName(sid))
 		if err != nil {
 			log.Printf("failed to create PP Secret: %v", err)
 			return nil
@@ -120,8 +136,9 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 	}
 
 	// >>> Update the KBS about the SID's Secret !!! <<<
-	// >>>  TBD TBD TBD
-	// >>>
+	sidSecretPath := fmt.Sprintf("default/pp-%s/privateKey", sid)
+	log.Printf("Updating KBS with secret for: %s", sidSecretPath)
+	c.kc.PostResource(sidSecretPath, privateKey)
 
 	var serverSshPublicKeyBytes []byte
 

@@ -47,6 +47,7 @@ require (
 )
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.2.1
 	golang.org/x/sys v0.18.0 // indirect
 	k8s.io/client-go v0.29.2
 )
