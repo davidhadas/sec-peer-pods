@@ -17,6 +17,7 @@ func main() {
 	ipAddrs := []netip.Addr{ipAddr}
 
 	go test.HttpServer("7777")
+	go test.HttpServer("7070")
 	go test.HttpServer("8888")
 
 	///////// Adaptor Initialization when SSH is enabled

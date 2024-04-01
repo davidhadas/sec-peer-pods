@@ -56,10 +56,10 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	kubemgr.InitKubeMgr()
 
 	// Read WN Secret
-	wnPrivateKey, _, err := kubemgr.KubeMgr.ReadSecret(ADAPTOR_SSH_SECRET)
+	wnPrivateKey, wnPublicKey, err := kubemgr.KubeMgr.ReadSecret(ADAPTOR_SSH_SECRET)
 	if err != nil {
 		// auto-create a secret
-		wnPrivateKey, _, err = kubemgr.KubeMgr.CreateSecret(ADAPTOR_SSH_SECRET)
+		wnPrivateKey, wnPublicKey, err = kubemgr.KubeMgr.CreateSecret(ADAPTOR_SSH_SECRET)
 		if err != nil {
 			return nil, fmt.Errorf("failed to auto create WN Secret: %w", err)
 		}
@@ -83,6 +83,10 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	if err != nil {
 		return nil, fmt.Errorf("KbsClient - %v", err)
 	}
+
+	wnSecretPath := "default/sshclient/publicKey"
+	log.Printf("Updating KBS with secret for: %s", wnSecretPath)
+	kc.PostResource(wnSecretPath, wnPublicKey)
 
 	sshClient := &SshClient{
 		kc:                        kc,
@@ -124,6 +128,7 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 	var err error
 
 	// Try reading first in case we resume an existing PP
+	log.Printf("InitPP Read/Create PP Secret named: %s", PpSecretName(sid))
 	privateKey, publicKey, err = kubemgr.KubeMgr.ReadSecret(PpSecretName(sid))
 	if err != nil {
 		privateKey, publicKey, err = kubemgr.KubeMgr.CreateSecret(PpSecretName(sid))
