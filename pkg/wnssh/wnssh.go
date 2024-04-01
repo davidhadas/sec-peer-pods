@@ -52,7 +52,7 @@ func PpSecretName(sid string) string {
 	return "pp-" + sid
 }
 
-func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string) (*SshClient, error) {
+func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string, kbsUrl string) (*SshClient, error) {
 	kubemgr.InitKubeMgr()
 
 	// Read WN Secret
@@ -78,9 +78,7 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 		return nil, fmt.Errorf("failed to read KBS Client Secret: %w", err)
 	}
 
-	//kc := InitKbsClient("http://kbs-service.kbs-operator-system:8080/kbs/v0")
-	//kc := InitKbsClient("http://192.168.122.43:30507/kbs/v0")
-	kc := InitKbsClient("http://127.0.0.1:8888/kbs/v0")
+	kc := InitKbsClient(kbsUrl)
 	err = kc.SetPemSecret(kbscPrivateKey)
 	if err != nil {
 		return nil, fmt.Errorf("KbsClient - %v", err)
