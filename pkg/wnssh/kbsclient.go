@@ -5,7 +5,6 @@ import (
 	"crypto"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -58,27 +57,30 @@ func (kc *KbsClient) addToken(req *http.Request) error {
 }
 
 func (kc *KbsClient) PostResource(path string, data []byte) error {
-	//url := fmt.Sprintf("http://kbs-service.kbs-operator-system:8080/kbs/v0/resource/%s", path)
 	url := fmt.Sprintf("%s/resource/%s", kc.url, path)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
 	if err != nil {
 		return fmt.Errorf("KbsClient faield to PostResource - %v", err)
 	}
-	kc.addToken(req)
+	err = kc.addToken(req)
+	if err != nil {
+		return fmt.Errorf("KbsClient failed to create token - %v", err)
+	}
 	req.Header.Add("Accept", "application/octet-stream")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("Error on response -", err)
-		return fmt.Errorf("KbsClient error on response - %v", err)
+		return fmt.Errorf("KbsClient failed to send set-resource request to Trusty - %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 200 { // Success
+		return nil
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("KbsClient while reading the response bytes - %v", err)
 	}
-	log.Printf("KbsClient got response: %s", string([]byte(body)))
-	return nil
+	return fmt.Errorf("KbsClient failed to set secfret at Trusty: %s", string([]byte(body)))
 }

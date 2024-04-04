@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/netip"
+	"runtime"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/wnssh"
@@ -25,8 +27,14 @@ func main() {
 	//kc := InitKbsClient("http://192.168.122.43:30507/kbs/v0")
 	//"http://127.0.0.1:8888/kbs/v0"
 
-	sshClient, err := wnssh.InitSshClient([]string{}, []string{"KBS:7070"}, []string{"KATAAPI:7100"}, []string{"KUBEAPI:6443", "DNS:9053"}, "http://127.0.0.1:8888/kbs/v0")
-	//sshClient, err := wnssh.InitSshClient([]string{}, []string{"KBS:7070"}, []string{}, []string{})
+	go func() {
+		for {
+			fmt.Printf("Goroutines: %d\n", runtime.NumGoroutine())
+			time.Sleep(time.Second)
+		}
+	}()
+
+	sshClient, err := wnssh.InitSshClient([]string{"K:KATAAPI:0"}, []string{"B:KBS:7070", "K:KUBEAPI:6443", "K:DNS:9053"}, "http://127.0.0.1:8888/kbs/v0")
 	if err != nil {
 		log.Printf("InitSshClient %v", err)
 		return
@@ -49,40 +57,39 @@ func main() {
 
 	////////// CreateVM
 	// add sandbox
+	for {
+		////////// StartVM
+		ctx := context.Background()
 
-	////////// StartVM
-	ctx := context.Background()
+		// Set sid, ipAddrs in peerpods crd
+		// Then do:
+		ci := sshClient.InitPP(ctx, sid, ipAddrs)
+		if ci == nil {
+			log.Print("failed InitiatePeerPodTunnel")
+			// fail StartVM
+			return
+		}
 
-	// Set sid, ipAddrs in peerpods crd
-	// Then do:
-	ci := sshClient.InitPP(ctx, sid, ipAddrs)
-	if ci == nil {
-		log.Print("failed InitiatePeerPodTunnel")
-		// fail StartVM
-		return
-	}
-
-	/*
 		inPort := ci.GetPort("KATAAPI")
 		if inPort == "" {
 			log.Print("failed find port")
 			// fail StartVM
 			return
 		}
-		go test.Client(inPort)
-	*/
+		go test.HttpClient(fmt.Sprintf("http://127.0.0.1:%s", inPort))
 
-	if err := ci.Start(); err != nil {
-		log.Printf("failed InitiatePeerPodTunnel: %s", err)
-		// fail StartVM
-		return
+		if err := ci.Start(); err != nil {
+			log.Printf("failed ci.Start: %s", err)
+			// fail StartVM
+			return
+		}
+		// Set ci in sandbox
+		time.Sleep(time.Second * 30)
+
+		////////// StopVM
+		// get ci from sandbox based on sid
+		ci.DisconnectPP(sid)
+		time.Sleep(time.Second * 30)
+
 	}
-	go test.HttpClient("http://127.0.0.1:7100")
-	// Set ci in sandbox
-	time.Sleep(time.Minute * 10)
-
-	////////// StopVM
-	// get ci from sandbox based on sid
-	ci.DisconnectPP(sid)
-	time.Sleep(time.Minute * 10)
 }

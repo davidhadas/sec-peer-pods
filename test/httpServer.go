@@ -6,14 +6,17 @@ import (
 	"net/http"
 )
 
-func getRoot(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("got request %s\n", r.URL)
-	io.WriteString(w, "This is my website!\n")
+type myport string
+
+func (p myport) getRoot(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("HttpServer port %s got request %s\n", p, r.URL)
+	io.WriteString(w, fmt.Sprintf("port %s - this is my website!\n", p))
 }
 
 func HttpServer(port string) {
+	p := myport(port)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", getRoot)
+	mux.HandleFunc("/", p.getRoot)
 	s := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,

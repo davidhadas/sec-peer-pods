@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/sshproxy"
 	"github.com/davidhadas/sec-peer-pods/pkg/sshutil"
@@ -27,7 +28,7 @@ const (
 )
 
 func k8sPhase(listener net.Listener, inbounds sshproxy.Inbounds, outbounds sshproxy.Outbounds, ppSecrets *PpSecrets) {
-	log.Printf("waiting for Kubernetes client to connect\n")
+	log.Printf("Kubernetes Phase: waiting for client to connect\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -93,25 +94,19 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 	//peer.Wait()
 }
 
-func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string, getSecret GetSecret) {
+func InitSshServer(inbound_strings, outbounds_strings []string, getSecret GetSecret) {
 	Singleton()
-	var attestation_inbounds, k8s_inbounds sshproxy.Inbounds
-	var attestation_outbounds, k8s_outbounds sshproxy.Outbounds
-	for _, tag := range attestationInbounds {
-		if err := attestation_inbounds.Add(tag, ""); err != nil {
-			log.Fatalf("Attastation Phase: Failed to open port %s:  %v", tag, err)
+	var inbounds sshproxy.Inbounds
+	var outbounds sshproxy.Outbounds
+	var wg sync.WaitGroup
+	for _, tag := range inbound_strings {
+		_, _, err := inbounds.Add(tag, &wg)
+		if err != nil {
+			log.Fatalf("failed to add inbound %s: %v", tag, err)
 		}
 	}
-	for _, tag := range attestationOutbounds {
-		attestation_outbounds.Add(tag)
-	}
-	for _, tag := range kubernetesInbounds {
-		if err := k8s_inbounds.Add(tag, ""); err != nil {
-			log.Fatalf("Kubernetes Phase: Failed to open port %s:  %v", tag, err)
-		}
-	}
-	for _, tag := range kubernetesOutbounds {
-		k8s_outbounds.Add(tag)
+	for _, tag := range outbounds_strings {
+		outbounds.Add(tag)
 	}
 
 	log.Printf("SSH Service starting 0.0.0.0:%s\n", sshutil.SSHPORT)
@@ -122,9 +117,9 @@ func InitSshServer(attestationInbounds, attestationOutbounds, kubernetesInbounds
 	ppSecrets := NewPpSecrets(getSecret)
 
 	go func() {
-		attestationPhase(listener, attestation_inbounds, attestation_outbounds, ppSecrets)
+		attestationPhase(listener, inbounds, outbounds, ppSecrets)
 		for {
-			k8sPhase(listener, k8s_inbounds, k8s_outbounds, ppSecrets)
+			k8sPhase(listener, inbounds, outbounds, ppSecrets)
 		}
 	}()
 }
@@ -244,7 +239,10 @@ func KubernetesSShService(ctx context.Context, nConn net.Conn, ppSecrets *PpSecr
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, "Kubernetes", conn, chans, sshReqs, "")
+	peer := sshproxy.NewSshPeer(ctx, sshproxy.KUBERNETES, conn, chans, sshReqs, "")
+	if peer == nil {
+		return nil, fmt.Errorf("failed to connect to an ssh peer")
+	}
 	return peer, nil
 }
 
@@ -265,7 +263,7 @@ func AttestationSShService(ctx context.Context, nConn net.Conn) (*sshproxy.SshPe
 	}
 
 	// Starting ssh tunnel services for attestation phase
-	peer := sshproxy.NewSshPeer(ctx, "Attestation", conn, chans, sshReqs, "")
+	peer := sshproxy.NewSshPeer(ctx, sshproxy.ATTESTATION, conn, chans, sshReqs, "")
 	return peer, nil
 }
 

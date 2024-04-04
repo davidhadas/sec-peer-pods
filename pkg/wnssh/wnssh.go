@@ -10,7 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
@@ -24,35 +24,33 @@ const ADAPTOR_SSH_SECRET = "sshclient"
 const SSH_PORT = ":2022"
 
 type SshClient struct {
-	kc                        *KbsClient
-	wnSigner                  *ssh.Signer
-	kubernetesPhaseInbounds   []string
-	kubernetesPhaseOutbounds  []string
-	attestationPhaseInbounds  []string
-	attestationPhaseOutbounds []string
+	kc              *KbsClient
+	wnSigner        *ssh.Signer
+	inboundStrings  []string
+	outboundStrings []string
 }
 
 type SshClientInstance struct {
-	sid                     string
-	publicKey               []byte
-	ppAddr                  []string
-	sshClient               *SshClient
-	ctx                     context.Context
-	cancel                  context.CancelFunc
-	k8sPhase                bool
-	attestationInbounds     sshproxy.Inbounds
-	attestationOutbounds    sshproxy.Outbounds
-	kubernetesInbounds      sshproxy.Inbounds
-	kubernetesOutbounds     sshproxy.Outbounds
-	attestationInboundPorts map[string]string
-	kubernetesInboundPorts  map[string]string
+	sid          string
+	publicKey    []byte
+	ppAddr       []string
+	sshClient    *SshClient
+	ctx          context.Context
+	cancel       context.CancelFunc
+	k8sPhase     bool
+	inbounds     sshproxy.Inbounds
+	outbounds    sshproxy.Outbounds
+	inboundPorts map[string]string
+	wg           sync.WaitGroup
 }
+
+var logger = log.New(log.Writer(), "[adaptor/wnssh] ", log.LstdFlags|log.Lmsgprefix)
 
 func PpSecretName(sid string) string {
 	return "pp-" + sid
 }
 
-func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds, kubernetesOutbounds []string, kbsUrl string) (*SshClient, error) {
+func InitSshClient(inbound_strings, outbound_strings []string, kbsUrl string) (*SshClient, error) {
 	kubemgr.InitKubeMgr()
 
 	// Read WN Secret
@@ -86,15 +84,16 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 
 	wnSecretPath := "default/sshclient/publicKey"
 	log.Printf("Updating KBS with secret for: %s", wnSecretPath)
-	kc.PostResource(wnSecretPath, wnPublicKey)
+	err = kc.PostResource(wnSecretPath, wnPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("PostResource: %v", err)
+	}
 
 	sshClient := &SshClient{
-		kc:                        kc,
-		wnSigner:                  &signer,
-		attestationPhaseInbounds:  attestationInbounds,
-		attestationPhaseOutbounds: attestationOutbounds,
-		kubernetesPhaseInbounds:   kubernetesInbounds,
-		kubernetesPhaseOutbounds:  kubernetesOutbounds,
+		kc:              kc,
+		wnSigner:        &signer,
+		inboundStrings:  inbound_strings,
+		outboundStrings: outbound_strings,
 	}
 
 	return sshClient, nil
@@ -103,19 +102,20 @@ func InitSshClient(attestationInbounds, attestationOutbounds, kubernetesInbounds
 func (ci *SshClientInstance) GetPort(name string) string {
 	var ok bool
 	var inPort string
-	inPort, ok = ci.kubernetesInboundPorts[name]
+	inPort, ok = ci.inboundPorts[name]
 	if !ok {
-		inPort, ok = ci.attestationInboundPorts[name]
-		if !ok {
-			return ""
-		}
+		return ""
 	}
 	return inPort
 }
 func (ci *SshClientInstance) DisconnectPP(sid string) {
-	log.Print("SshClientInstance DisconnectPP")
+
+	ci.inbounds.DelAll()
+
 	// Cancel the VM connction
 	ci.cancel()
+	ci.wg.Wait()
+	log.Print("SshClientInstance DisconnectPP Success")
 
 	// Remove peerPod Secret named peerPodId
 	// TBD: Add this code once KBS integration is complete
@@ -141,7 +141,11 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 	// >>> Update the KBS about the SID's Secret !!! <<<
 	sidSecretPath := fmt.Sprintf("default/pp-%s/privateKey", sid)
 	log.Printf("Updating KBS with secret for: %s", sidSecretPath)
-	c.kc.PostResource(sidSecretPath, privateKey)
+	err = c.kc.PostResource(sidSecretPath, privateKey)
+	if err != nil {
+		log.Printf("failed to PostResource PP Secret: %v", err)
+		return nil
+	}
 
 	var serverSshPublicKeyBytes []byte
 
@@ -161,37 +165,24 @@ func (c *SshClient) InitPP(ctx context.Context, sid string, ipAddr []netip.Addr)
 
 	ctx, cancel := context.WithCancel(ctx)
 	ci := &SshClientInstance{
-		sid:                     sid,
-		publicKey:               serverSshPublicKeyBytes,
-		ppAddr:                  ppAddr,
-		sshClient:               c,
-		ctx:                     ctx,
-		cancel:                  cancel,
-		attestationInboundPorts: make(map[string]string),
-		kubernetesInboundPorts:  make(map[string]string),
+		sid:          sid,
+		publicKey:    serverSshPublicKeyBytes,
+		ppAddr:       ppAddr,
+		sshClient:    c,
+		ctx:          ctx,
+		cancel:       cancel,
+		inboundPorts: make(map[string]string),
 	}
 
-	for _, tag := range c.attestationPhaseInbounds {
-		inPort := sshutil.GetRandomPort()
-		for ci.attestationInbounds.Add(tag, inPort) != nil {
-			inPort = sshutil.GetRandomPort()
+	for _, tag := range c.inboundStrings {
+		name, inPort, err := ci.inbounds.Add(tag, &ci.wg)
+		if err != nil {
+			log.Printf("failed to add inbound: %v", err)
 		}
-		splits := strings.Split(tag, ":")
-		ci.attestationInboundPorts[splits[0]] = inPort
+		ci.inboundPorts[name] = inPort
 	}
-	for _, tag := range c.attestationPhaseOutbounds {
-		ci.attestationOutbounds.Add(tag)
-	}
-	for _, tag := range c.kubernetesPhaseInbounds {
-		inPort := sshutil.GetRandomPort()
-		for ci.kubernetesInbounds.Add(tag, inPort) != nil {
-			inPort = sshutil.GetRandomPort()
-		}
-		splits := strings.Split(tag, ":")
-		ci.kubernetesInboundPorts[splits[0]] = inPort
-	}
-	for _, tag := range c.kubernetesPhaseOutbounds {
-		ci.kubernetesOutbounds.Add(tag)
+	for _, tag := range c.outboundStrings {
+		ci.outbounds.Add(tag)
 	}
 
 	return ci
@@ -209,12 +200,14 @@ func (ci *SshClientInstance) Start() error {
 	}
 
 	// Kubernetes Phase
+	ci.wg.Add(1)
 	go func() {
+		defer ci.wg.Done()
 		restarts := 0
 		for {
 			select {
 			case <-ci.ctx.Done():
-				log.Printf("Kubernetes Phase: Connect VM Done")
+				log.Printf("Kubernetes Phase: Done")
 				return
 			default:
 				log.Printf("Kubernetes Phase: Starting (Number of restarts %d)", restarts)
@@ -231,47 +224,39 @@ func (ci *SshClientInstance) Start() error {
 
 func (ci *SshClientInstance) StartKubernetes() error {
 	ctx, cancel := context.WithCancel(ci.ctx)
-
-	peer := ci.StartSshClient(ctx, "Kubernetes", ci.publicKey, ci.sid)
+	defer cancel()
+	peer := ci.StartSshClient(ctx, sshproxy.KUBERNETES, ci.publicKey, ci.sid)
 	if peer == nil {
-		cancel()
+
 		return fmt.Errorf("Kubernetes Phase: failed StartSshClient")
 	}
 
-	peer.AddOutbounds(ci.kubernetesOutbounds)
-	err := peer.AddInbounds(ci.kubernetesInbounds)
+	peer.AddOutbounds(ci.outbounds)
+	err := peer.AddInbounds(ci.inbounds)
 	if err != nil {
 		peer.Close("Inbounds failed")
-		cancel()
 		peer = nil
 		return fmt.Errorf("inbounds failed: %w", err)
-	} else {
-		peer.Wait()
-		cancel()
 	}
+	peer.Wait()
 	return nil
 }
 
 func (ci *SshClientInstance) StartAttestation() error {
 	ctx, cancel := context.WithCancel(ci.ctx)
-
-	peer := ci.StartSshClient(ctx, "Attestation", nil, ci.sid)
+	defer cancel()
+	peer := ci.StartSshClient(ctx, sshproxy.ATTESTATION, nil, ci.sid)
 	if peer == nil {
-		cancel()
 		return fmt.Errorf("Attestation Phase: failed StartSshClient")
 	}
-	peer.AddOutbounds(ci.attestationOutbounds)
-	err := peer.AddInbounds(ci.attestationInbounds)
+	peer.AddOutbounds(ci.outbounds)
+	err := peer.AddInbounds(ci.inbounds)
 	if err != nil {
 		peer.Close("Inbounds failed")
-		cancel()
 		peer = nil
 		return fmt.Errorf("inbounds failed: %w", err)
-	} else {
-		peer.Wait()
-		cancel()
 	}
-
+	peer.Wait()
 	return nil
 }
 

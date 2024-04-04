@@ -21,20 +21,17 @@ func main() {
 
 	go test.HttpServer("7111")
 
-	ppssh.InitSshServer([]string{"KBS:7000"}, []string{}, []string{"KUBEAPI:6443", "DNS:9053"}, []string{"KATAAPI:127.0.0.1:7111"}, ppssh.GetSecret(getKey))
-	//ppssh.InitSshServer([]string{"KBS:7000"}, []string{}, []string{}, []string{}, ppssh.GetSecret(getKey))
+	ppssh.InitSshServer([]string{"B:KBS:7000", "K:KUBEAPI:6443", "K:DNS:9053"}, []string{"K:KATAAPI:127.0.0.1:7111"}, ppssh.GetSecret(getKey))
 
 	go test.HttpClient("http://127.0.0.1:7000/")
 	go test.HttpClient("http://127.0.0.1:7000/aaa/bbb/" + ppssh.PP_SID + "privateKey")
 
-	time.Sleep(30 * time.Second)
+	time.Sleep(15 * time.Second)
 
 	// >>>>>>>>>>>>>>>>>>>>> Testing only <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
 	sid := "fake"
 	_, tePublicKey, _ := kubemgr.KubeMgr.ReadSecret(wnssh.ADAPTOR_SSH_SECRET)
 	ppPrivateKey, _, _ := kubemgr.KubeMgr.ReadSecret(wnssh.PpSecretName(sid))
-
 	if err := os.WriteFile("/var"+ppssh.PROVEN_WN_PUBLIC_KEY_PATH, tePublicKey, 0600); err != nil {
 		log.Print(err.Error())
 		return
@@ -43,9 +40,12 @@ func main() {
 		log.Print(err.Error())
 		return
 	}
-
 	ppssh.CopyFile("/var"+ppssh.PROVEN_WN_PUBLIC_KEY_PATH, ppssh.PROVEN_WN_PUBLIC_KEY_PATH)
 	ppssh.CopyFile("/var"+ppssh.PROVEN_PP_PRIVATE_KEY_PATH, ppssh.PROVEN_PP_PRIVATE_KEY_PATH)
+	// >>>>>>>>>>>>>>>>>>>>> End of Testing only <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+	time.Sleep(15 * time.Second)
+	go test.HttpClient("http://127.0.0.1:7000/xxx/yyy/some-resource")
 
 	time.Sleep(10 * time.Minute)
 }
@@ -63,50 +63,3 @@ func getKey(key string) (data []byte, err error) {
 	}
 	return
 }
-
-/*
-	func WaitForProvenKeys(ctx context.Context, peer *sshproxy.SshPeer) {
-		go func() {
-			ticker := time.NewTicker(200 * time.Millisecond)
-		OUT:
-			for {
-				select {
-				case <-ticker.C:
-					if key, err := os.ReadFile(ppssh.PROVEN_PP_PRIVATE_KEY_PATH); err != nil || len(key) == 0 {
-						continue
-					}
-					if key, err := os.ReadFile(ppssh.PROVEN_WN_PUBLIC_KEY_PATH); err != nil || len(key) == 0 {
-						continue
-					}
-
-					log.Printf("Found files %s, %s", ppssh.PROVEN_PP_PRIVATE_KEY_PATH, ppssh.PROVEN_WN_PUBLIC_KEY_PATH)
-
-					peer.Close("Found proven files")
-					break OUT
-				case <-ctx.Done():
-					break OUT
-				}
-			}
-			ticker.Stop()
-		}()
-	}
-*/
-/*
-func getKubernetesPhaseKeys() (ppPrivateKeyBytes []byte, tePublicKeyBytes []byte) {
-	var err error
-
-	ppPrivateKeyBytes, err = os.ReadFile(ppssh.PROVEN_PP_PRIVATE_KEY_PATH)
-	if err != nil {
-		log.Fatalf("SSH Server failed to get PP Private Key from %s, err: %v", ppssh.PROVEN_PP_PRIVATE_KEY_PATH, err)
-	}
-
-	// Kubernetes Phase  - must have WN proven tePublicKeyBytes and ppPrivateKeyBytes
-	tePublicKeyBytes, err = os.ReadFile(ppssh.PROVEN_WN_PUBLIC_KEY_PATH)
-	if err != nil {
-		log.Fatalf("SSH Server failed to get WN Public Key from %s, err: %v", ppssh.PROVEN_WN_PUBLIC_KEY_PATH, err)
-	}
-
-	log.Printf("SSH Server initialized keys for Kubernetes Phase")
-	return
-}
-*/

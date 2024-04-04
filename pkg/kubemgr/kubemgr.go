@@ -67,7 +67,6 @@ func (kubeMgr *KubeMgrStruct) ReadSecret(secretName string) (privateKey []byte, 
 	secrets := kubeMgr.client.CoreV1().Secrets(kubeMgr.cocoNamespace)
 	secret, err := secrets.Get(context.Background(), secretName, metav1.GetOptions{})
 	if err != nil {
-		log.Printf("ReadSecret return an error: %s", err.Error())
 		return
 	}
 	privateKey = secret.Data["privateKey"]
