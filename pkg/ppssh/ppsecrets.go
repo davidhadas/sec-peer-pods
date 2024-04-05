@@ -37,13 +37,18 @@ func (fs *PpSecrets) Go() {
 		log.Printf("PpSecrets obtaining key %s", key)
 
 		data, err := fs.getSecret(key)
-		if err == nil {
+		if err == nil && len(data) > 0 {
 			log.Printf("PpSecrets %s success", key)
 			fs.secrets[key] = data
 			fs.keys = fs.keys[1:]
 			continue
 		}
-		log.Printf("PpSecrets %s getSecret err: %v", key, err)
+		if err != nil {
+			log.Printf("PpSecrets %s getSecret err: %v", key, err)
+		} else {
+			log.Printf("PpSecrets %s getSecret retruned an empty secret", key)
+		}
+
 		time.Sleep(sleeptime * time.Second)
 		sleeptime *= 2
 		if sleeptime > 30 {

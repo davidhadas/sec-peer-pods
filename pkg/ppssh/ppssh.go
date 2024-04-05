@@ -195,7 +195,6 @@ func InitAttestationPhaseSshConfig() *ssh.ServerConfig {
 	config := &ssh.ServerConfig{}
 
 	ppPrivateKeyBytes, tePublicKeyBytes := getAttestationPhaseKeys()
-	log.Printf("tePublicKeyBytes '%s'", string(tePublicKeyBytes))
 
 	if tePublicKeyBytes != nil { // connect with an client public key
 		setPublicKey(config, tePublicKeyBytes)
