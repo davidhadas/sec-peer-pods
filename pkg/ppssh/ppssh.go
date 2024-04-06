@@ -93,6 +93,7 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 		ppSecrets.Go() // wait for the keys
 		config, err := InitKubernetesPhaseSshConfig(ppSecrets)
 		if err != nil {
+			log.Printf("Attastation Phase: InitKubernetesPhaseSshConfig is ready\n")
 			return config
 		}
 		log.Printf("Attastation Phase: failed getting keys from KBS: %v\n", err)
@@ -172,6 +173,7 @@ func getAttestationPhaseKeys() (ppPrivateKeyBytes []byte, tePublicKeyBytes []byt
 func setConfigHostKey(config *ssh.ServerConfig, ppPrivateKeyBytes []byte) error {
 	serverSigner, err := ssh.ParsePrivateKey(ppPrivateKeyBytes)
 	if err != nil {
+		log.Println("***** ERROR in received KEY ppPrivateKeyBytes ****")
 		return fmt.Errorf("ssh.ParsePrivateKey of ppPrivateKeyBytes %w", err)
 	}
 	config.AddHostKey(serverSigner)
@@ -181,6 +183,7 @@ func setConfigHostKey(config *ssh.ServerConfig, ppPrivateKeyBytes []byte) error 
 func setPublicKey(config *ssh.ServerConfig, tePublicKeyBytes []byte) error {
 	teSshPublicKey, _, _, _, err := ssh.ParseAuthorizedKey(tePublicKeyBytes)
 	if err != nil {
+		log.Println("***** ERROR in received KEY tePublicKeyBytes ****")
 		return fmt.Errorf("ssh.ParseAuthorizedKey of tePublicKeyBytes %w", err)
 	}
 
