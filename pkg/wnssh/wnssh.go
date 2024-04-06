@@ -51,7 +51,10 @@ func PpSecretName(sid string) string {
 }
 
 func InitSshClient(inbound_strings, outbound_strings []string, kbsUrl string) (*SshClient, error) {
-	kubemgr.InitKubeMgr()
+	err := kubemgr.InitKubeMgr()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize KubeMgr: %w", err)
+	}
 
 	// Read WN Secret
 	wnPrivateKey, wnPublicKey, err := kubemgr.KubeMgr.ReadSecret(ADAPTOR_SSH_SECRET)

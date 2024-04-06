@@ -429,13 +429,14 @@ func (outbound *Outbound) acceptProxy(chChan ssh.Channel, chReqs <-chan *ssh.Req
 				chChan.Close()
 				return
 			}
+
 			err = resp.Write(chChan)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				log.Printf("Outbound %s acceptProxy Error in proxy resp.Write: %v", outbound.Name, err)
 				chChan.Close()
 				return
 			}
-			log.Printf("Outbound %s acceptProxy received a response for %s", outbound.Name, req.URL.Path)
+			log.Printf("Outbound %s acceptProxy received a response for %s Status Code %d", outbound.Name, req.URL.Path, resp.StatusCode)
 		}
 	}()
 }
