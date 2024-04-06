@@ -256,7 +256,7 @@ func (peer *SshPeer) Wait() {
 
 func (peer *SshPeer) Close(who string) {
 	if peer.terminated == "" {
-		//log.Printf("%s Phase: Peer Done by >>> %s <<<", peer.phase, who)
+		log.Printf("%s Phase: Peer Done by >>> %s <<<", peer.phase, who)
 		peer.terminated = who
 		peer.sshConn.Close()
 		close(peer.done)
@@ -441,9 +441,9 @@ func (outbound *Outbound) acceptProxy(chChan ssh.Channel, chReqs <-chan *ssh.Req
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("Outbound %s acceptProxy error in proxy ReadRequest: %v", outbound.Name, err)
+					chChan.Close()
+					return
 				}
-				chChan.Close()
-				return
 			}
 			req.URL.Path = SID(sid).urlModifier(req.URL.Path)
 			req.URL.Scheme = "http"
@@ -452,7 +452,7 @@ func (outbound *Outbound) acceptProxy(chChan ssh.Channel, chReqs <-chan *ssh.Req
 
 			resp, err := proxy.Transport.RoundTrip(req)
 			if err != nil {
-				log.Printf("Outbound %s acceptProxy Error in proxy.Transport.RoundTrip: %v", outbound.Name, err)
+				log.Printf("Outbound %s acceptProxy error in proxy.Transport.RoundTrip: %v", outbound.Name, err)
 				chChan.Close()
 				return
 			}
