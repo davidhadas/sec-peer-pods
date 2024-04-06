@@ -13,7 +13,12 @@ import (
 )
 
 func main() {
-	kubemgr.InitKubeMgr()
+	kubemgr.SkipVerify = true
+	err := kubemgr.InitKubeMgr()
+	if err != nil {
+		fmt.Printf("failed to initialize KubeMgr: %v", err)
+		return
+	}
 	os.Remove(ppssh.PROVEN_PP_PRIVATE_KEY_PATH)
 	os.Remove(ppssh.PROVEN_WN_PUBLIC_KEY_PATH)
 	os.Remove(ppssh.UNPROVEN_WN_PUBLIC_KEY_PATH)
@@ -21,12 +26,13 @@ func main() {
 
 	go test.HttpServer("7111")
 
-	ppssh.InitSshServer([]string{"B:KBS:7000", "K:KUBEAPI:6443", "K:DNS:9053"}, []string{"K:KATAAPI:127.0.0.1:7111"}, ppssh.GetSecret(getKey))
+	ppssh.InitSshServer([]string{"B:KBS:7000", "K:KUBEAPI:16443", "K:DNS:9053"}, []string{"K:KATAAPI:127.0.0.1:7111"}, ppssh.GetSecret(getKey))
 
-	go test.HttpClient("http://127.0.0.1:7000/")
-	go test.HttpClient("http://127.0.0.1:7000/aaa/bbb/" + ppssh.PP_SID + "privateKey")
+	//go test.HttpClient("http://127.0.0.1:7000/")
+	go test.HttpClient("http://127.0.0.1:7000/kbs/v0/resource/default/sshclient/publicKey")
+	//go test.HttpClient("http://127.0.0.1:7000/kbs/0/default/pp-" + ppssh.PP_SID + "privateKey")
 
-	time.Sleep(15 * time.Second)
+	time.Sleep(120 * time.Second)
 
 	// >>>>>>>>>>>>>>>>>>>>> Testing only <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 	sid := "fake"

@@ -34,6 +34,7 @@ type SshPeer struct {
 	outbounds  map[string]*Outbound
 	inbounds   map[string]*Inbound
 	wg         sync.WaitGroup
+	upgrade    bool
 }
 
 // Inbound side of the Tunnel - incoming tcp connections from local clients
@@ -184,9 +185,17 @@ func NewSshPeer(ctx context.Context, phase string, sshConn ssh.Conn, chans <-cha
 					if req.Type == "Phase" {
 						log.Printf("%s Phase: peer reported Phase %s", phase, string(req.Payload))
 						req.Reply(true, []byte(peer.phase))
+						continue
+					}
+					if phase == ATTESTATION && req.Type == "Upgrade" {
+						log.Printf("%s Phase: peer reported it is Upgrading to Kubernetes Phase", phase)
+						req.Reply(true, []byte(peer.phase))
+						peer.upgrade = true
+						continue
 					}
 					req.Reply(false, nil)
 				}
+
 			case <-ctx.Done():
 				peer.Close("Context Canceled")
 				return
@@ -251,6 +260,24 @@ func (peer *SshPeer) Close(who string) {
 		peer.terminated = who
 		peer.sshConn.Close()
 		close(peer.done)
+	}
+}
+
+func (peer *SshPeer) IsUpgraded() bool {
+	return peer.upgrade
+}
+
+func (peer *SshPeer) Upgrade() {
+	ok, _, err := peer.sshConn.SendRequest("Upgrade", true, []byte{})
+	if !ok {
+		log.Printf("%s Phase: SshPeer Upgrade failed", peer.phase)
+		peer.Close("Phase verification failed")
+		return
+	}
+	if err != nil {
+		log.Printf("%s Phase:SshPeer Upgrade failed, err: %v", peer.phase, err)
+		peer.Close("Phase verification failed")
+		return
 	}
 }
 

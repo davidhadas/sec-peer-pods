@@ -92,8 +92,9 @@ func attestationPhase(listener net.Listener, inbounds sshproxy.Inbounds, outboun
 		ppSecrets.AddKey(PP_PRIVATE_KEY)
 		ppSecrets.Go() // wait for the keys
 		config, err := InitKubernetesPhaseSshConfig(ppSecrets)
-		if err != nil {
+		if err == nil {
 			log.Printf("Attastation Phase: InitKubernetesPhaseSshConfig is ready\n")
+			peer.Upgrade()
 			return config
 		}
 		log.Printf("Attastation Phase: failed getting keys from KBS: %v\n", err)

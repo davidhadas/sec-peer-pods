@@ -30,6 +30,8 @@ type KubeMgrStruct struct {
 	cocoNamespace string
 }
 
+var SkipVerify bool
+
 func InitKubeMgr() error {
 	var err error
 	KubeMgr = &KubeMgrStruct{
@@ -56,6 +58,11 @@ func InitKubeMgr() error {
 	}
 
 	// Create a secrets client
+	if SkipVerify {
+		kubeCfg.TLSClientConfig.Insecure = true
+		kubeCfg.TLSClientConfig.CAData = nil
+	}
+
 	KubeMgr.client, err = kubernetes.NewForConfig(kubeCfg)
 	if err != nil {
 		return fmt.Errorf("failed to configure KubeApi using config: %w", err)
@@ -69,6 +76,7 @@ func (kubeMgr *KubeMgrStruct) ReadSecret(secretName string) (privateKey []byte, 
 	if err != nil {
 		return
 	}
+
 	privateKey = secret.Data["privateKey"]
 	publicKey = secret.Data["publicKey"]
 	return

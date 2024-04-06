@@ -8,11 +8,14 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/davidhadas/sec-peer-pods/pkg/kubemgr"
 	"github.com/davidhadas/sec-peer-pods/pkg/wnssh"
 	"github.com/davidhadas/sec-peer-pods/test"
 )
 
 func main() {
+	kubemgr.SkipVerify = true
+
 	// This sid should come from create container request
 	sid := "fake"                             // SID
 	ipAddr, _ := netip.ParseAddr("127.0.0.1") // ipAddr of the VM
@@ -34,7 +37,7 @@ func main() {
 		}
 	}()
 
-	sshClient, err := wnssh.InitSshClient([]string{"K:KATAAPI:0"}, []string{"B:KBS:7070", "K:KUBEAPI:6443", "K:DNS:9053"}, "http://127.0.0.1:8888/kbs/v0")
+	sshClient, err := wnssh.InitSshClient([]string{"K:KATAAPI:0"}, []string{"B:KBS:9999", "K:KUBEAPI:16443", "K:DNS:9053"}, "http://127.0.0.1:9999/kbs/v0")
 	if err != nil {
 		log.Printf("InitSshClient %v", err)
 		return

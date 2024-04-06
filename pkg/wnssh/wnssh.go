@@ -260,6 +260,9 @@ func (ci *SshClientInstance) StartAttestation() error {
 		return fmt.Errorf("inbounds failed: %w", err)
 	}
 	peer.Wait()
+	if !peer.IsUpgraded() {
+		return fmt.Errorf("Attestation PHASE closed without being upgraded")
+	}
 	return nil
 }
 
