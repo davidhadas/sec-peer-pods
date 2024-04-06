@@ -325,8 +325,9 @@ func NewInboundInstance(tcpConn io.ReadWriteCloser, peer *SshPeer, inbound *Inbo
 			// go ssh.DiscardRequests(channelReqs)
 			case req := <-channelReqs:
 				if req == nil {
-					//log.Printf("%s Phase: Inbound %s channelReqs closed", peer.phase, inbound.Name)
-					peer.Close("channelReqs closed")
+					log.Printf("%s Phase: Inbound %s channelReqs closed", peer.phase, inbound.Name)
+					tcpConn.Close()
+					sshChan.Close()
 					return
 				}
 				if req.WantReply {
